@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diario de salud</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ink:#22302A; --ink-soft:#5E6B63;
+    --paper:#EBE4D2; --paper-2:#DED2B3; --card:#F7F3E6;
+    --pine:#33493F; --pine-2:#22322A;
+    --sage:#8EA48F; --sage-light:#C9D3C2;
+    --rust:#B5573F; --gold:#C08A32; --white:#FCFAF3;
+    --line: rgba(34,48,42,0.14); --radius: 16px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--paper); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; min-height:100vh;}
+  .app{max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; background:var(--paper); position:relative;}
+
+  /* ---------- auth screen ---------- */
+  #authScreen{
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:32px 24px; text-align:center; background:var(--pine); color:var(--white);
+  }
+  #authScreen h1{font-family:'Fraunces', serif; font-size:26px; margin:14px 0 6px;}
+  #authScreen p{color:var(--sage-light); font-size:14px; max-width:320px; line-height:1.5;}
+  .btn-google{
+    margin-top:22px; background:var(--white); color:var(--pine-2); border:none; border-radius:11px;
+    padding:13px 22px; font-size:14.5px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:10px;
+  }
+  .setup-card{
+    margin-top:26px; background:rgba(255,255,255,0.08); border-radius:14px; padding:18px; text-align:left; max-width:340px;
+  }
+  .setup-card label{color:var(--sage-light); font-size:12px; display:block; margin:10px 0 5px;}
+  .setup-card input{width:100%; padding:10px; border-radius:9px; border:none; font-size:14px;}
+  .setup-card button{width:100%; margin-top:10px; padding:11px; border-radius:9px; border:none; background:var(--gold); color:var(--pine-2); font-weight:600; cursor:pointer;}
+  .setup-card .or{color:var(--sage-light); font-size:12px; margin:14px 0 4px; text-align:center;}
+  .id-box{
+    background:rgba(255,255,255,0.12); border-radius:9px; padding:10px 12px; font-family:'IBM Plex Mono', monospace;
+    font-size:13px; word-break:break-all; margin-top:8px; display:flex; justify-content:space-between; align-items:center; gap:8px;
+  }
+  .id-box button{width:auto; margin:0; padding:6px 10px; font-size:11.5px;}
+  .error-txt{color:#F3B7A6; font-size:12.5px; margin-top:8px;}
+
+  /* ---------- header ---------- */
+  .topbar{padding:22px 20px 14px; background:var(--pine); color:var(--white); border-radius:0 0 28px 28px; position:relative; overflow:hidden;}
+  .topbar::after{content:""; position:absolute; right:-30px; top:-30px; width:140px; height:140px; border-radius:50%; background:rgba(255,255,255,0.05);}
+  .topbar .eyebrow{font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--sage-light); margin:0 0 4px;}
+  .topbar h1{font-family:'Fraunces', serif; font-weight:600; font-size:28px; margin:0; line-height:1.1;}
+  .topbar .sub{font-size:13px; color:var(--sage-light); margin-top:6px;}
+  .pet-picker{margin-top:12px; width:100%; padding:9px 11px; border-radius:10px; border:1.5px solid rgba(255,255,255,0.35); background:rgba(255,255,255,0.08); color:var(--white); font-family:'IBM Plex Sans', sans-serif; font-size:13.5px;}
+  .pet-picker option{color:var(--ink);}
+
+  /* ---------- pastillero ---------- */
+  .pastillero{display:flex; gap:7px; margin-top:16px; padding:10px; background:var(--pine-2); border-radius:14px;}
+  .pill-day{flex:1; display:flex; flex-direction:column; align-items:center; gap:5px; padding:8px 2px 9px; border-radius:11px; cursor:pointer; border:1.5px solid transparent; background:transparent; color:var(--sage-light); font-family:'IBM Plex Mono', monospace; transition:transform .15s ease;}
+  .pill-day:hover{transform:translateY(-1px);}
+  .pill-day .l{font-size:10px; letter-spacing:.05em; opacity:.85;}
+  .pill-day .n{font-size:13px; font-weight:500;}
+  .pill-day .dot{width:7px;height:7px;border-radius:50%;background:transparent;margin-top:1px;}
+  .pill-day.today{border-color:var(--gold);}
+  .pill-day.selected{background:var(--white); color:var(--pine-2);}
+  .pill-day.selected .l{color:var(--pine-2);}
+  .pill-day.done .dot{background:var(--sage-light);}
+  .pill-day.selected.done .dot{background:var(--pine);}
+  .pill-day.missed .dot{background:var(--rust);}
+  .pill-day.future{opacity:.4; cursor:default;}
+
+  /* ---------- nav ---------- */
+  .tabs{display:flex; justify-content:space-around; background:var(--card); border-top:1px solid var(--line); padding:8px 6px calc(8px + env(safe-area-inset-bottom)); position:sticky; bottom:0; margin-top:auto;}
+  .tab-btn{flex:1; background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 2px; color:var(--ink-soft); font-size:11.5px; cursor:pointer; border-radius:10px;}
+  .tab-btn .ic{font-size:18px;}
+  .tab-btn.active{color:var(--pine); font-weight:600; background:var(--sage-light);}
+
+  /* ---------- content ---------- */
+  .content{flex:1; padding:18px 18px 28px;}
+  .view{display:none; animation:fade .25s ease;}
+  .view.active{display:block;}
+  @keyframes fade{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;}}
+  h2.section-title{font-family:'Fraunces', serif; font-size:19px; font-weight:600; margin:0 0 12px; color:var(--pine-2);}
+
+  .banner{background:var(--gold); color:var(--pine-2); border-radius:12px; padding:12px 14px; font-size:13.5px; margin-bottom:16px; display:flex; gap:10px; align-items:flex-start; line-height:1.4;}
+  .banner b{display:block; font-size:13.5px;}
+  .banner.rust{background:var(--rust); color:var(--white);}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:14px;}
+  .card h3{font-family:'Fraunces', serif; font-size:16px; margin:0 0 2px; font-weight:600;}
+  .muted{color:var(--ink-soft); font-size:12.5px;}
+  .mono{font-family:'IBM Plex Mono', monospace;}
+
+  label{display:block; font-size:12px; color:var(--ink-soft); margin:12px 0 5px; font-weight:500;}
+  label:first-child{margin-top:0;}
+  input[type=text], input[type=number], input[type=date], input[type=time], input[type=email], textarea, select{
+    width:100%; padding:10px 11px; border-radius:10px; border:1.5px solid var(--line); background:var(--white); color:var(--ink); font-size:14px;
+  }
+  textarea{resize:vertical; min-height:60px;}
+  input:focus, textarea:focus, select:focus{outline:2px solid var(--pine); outline-offset:1px;}
+  .row{display:flex; gap:10px;} .row > *{flex:1;}
+
+  .segmented{display:flex; background:var(--paper-2); border-radius:11px; padding:3px; gap:3px;}
+  .segmented button{flex:1; border:none; background:none; padding:8px 4px; font-size:12px; border-radius:8px; cursor:pointer; color:var(--ink-soft); font-weight:500;}
+  .segmented button.active{background:var(--pine); color:var(--white);}
+
+  button.primary{width:100%; padding:12px; background:var(--pine); color:var(--white); border:none; border-radius:11px; font-size:14.5px; font-weight:600; cursor:pointer; margin-top:16px;}
+  button.primary:active{background:var(--pine-2);}
+  button.secondary{width:100%; padding:11px; background:transparent; color:var(--pine); border:1.5px solid var(--pine); border-radius:11px; font-size:13.5px; font-weight:600; cursor:pointer; margin-top:8px;}
+  button.ghost-small{background:none; border:none; color:var(--rust); font-size:12px; cursor:pointer; padding:4px 0; text-decoration:underline;}
+  .icon-btn{background:var(--paper-2); border:none; border-radius:8px; width:30px; height:30px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; flex:none;}
+
+  .med-day-row{display:flex; gap:8px; align-items:center; margin-bottom:6px;}
+  .med-day-row .dnum{font-family:'IBM Plex Mono', monospace; font-size:12px; width:38px; color:var(--ink-soft); flex:none;}
+
+  .badge{display:inline-block; font-size:10.5px; font-weight:600; padding:3px 8px; border-radius:20px; font-family:'IBM Plex Mono', monospace; letter-spacing:.02em;}
+  .badge.fijo{background:var(--sage-light); color:var(--pine-2);}
+  .badge.variable{background:#DCC98F; color:var(--pine-2);}
+  .badge.recurrente{background:#C3D6E6; color:#264A63;}
+  .badge.inactivo{background:var(--paper-2); color:var(--ink-soft);}
+
+  .chk-row{display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);}
+  .chk-row:last-child{border-bottom:none;}
+  .chk-row input[type=checkbox]{width:20px; height:20px; accent-color:var(--pine); flex:none;}
+  .chk-row .info{flex:1;} .chk-row .info b{font-size:13.5px;} .chk-row .info div{font-size:12px; color:var(--ink-soft);}
+
+  .empty-state{text-align:center; padding:30px 10px; color:var(--ink-soft);}
+  .empty-state .big{font-size:32px; display:block; margin-bottom:6px;}
+
+  .hist-item{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:8px; cursor:pointer;}
+  .hist-item:hover{border-color:var(--pine);}
+  .hist-item .d{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--ink-soft);}
+  .hist-item .s{font-size:13.5px; margin-top:2px;}
+  .dot-status{width:9px; height:9px; border-radius:50%; flex:none;}
+  .dot-status.ok{background:var(--sage);} .dot-status.miss{background:var(--rust);}
+
+  .pet-row{display:flex; align-items:center; gap:8px; margin-bottom:10px;}
+  .pet-row input[type=text]{flex:1;}
+  .pet-row .tag-activa{font-size:10px; font-family:'IBM Plex Mono', monospace; background:var(--sage-light); color:var(--pine-2); padding:4px 8px; border-radius:20px; flex:none; border:none; cursor:pointer;}
+
+  .email-row{display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;}
+  .email-row:last-child{border-bottom:none;}
+
+  a.link-btn{display:block; text-align:center; text-decoration:none; border-radius:11px; font-weight:600;}
+  a.link-btn.primary-look{padding:12px; background:var(--pine); color:var(--white); font-size:14px; margin-top:4px;}
+  a.link-btn.secondary-look{padding:11px; border:1.5px solid var(--pine); color:var(--pine); font-size:13.5px; margin-top:8px;}
+
+  .toast{position:fixed; bottom:78px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--pine-2); color:var(--white); padding:10px 18px; border-radius:30px; font-size:13px; opacity:0; pointer-events:none; transition:all .25s ease; z-index:50; max-width:90%; text-align:center;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  #appScreen{display:none;}
+</style>
+</head>
+<body>
+
+<!-- ===================== PANTALLA DE LOGIN ===================== -->
+<div id="authScreen">
+  <div style="font-size:40px;">🐾</div>
+  <h1>Diario de salud</h1>
+  <p>Registro de síntomas y medicación de tu mascota, con tus datos guardados en tu propia cuenta.</p>
+  <button class="btn-google" id="btnGoogleLogin">
+    <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.85.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.05l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+    Iniciar sesión con Google
+  </button>
+
+  <div class="setup-card" id="joinCreateCard" style="display:none;">
+    <p style="color:var(--white); font-weight:600; margin:0;">¿Primera vez acá?</p>
+    <button id="btnCrearHogar">Crear mi hogar (primera mascota)</button>
+    <p class="or">— o —</p>
+    <label>Ya tengo un código de otro cuidador</label>
+    <input type="text" id="inputJoinCode" placeholder="Pegá el código acá">
+    <button id="btnUnirme">Unirme con este código</button>
+    <p class="error-txt" id="joinError"></p>
+  </div>
+
+  <p class="muted" style="color:var(--sage-light); margin-top:24px; font-size:11.5px;">No es un reemplazo del consejo veterinario.</p>
+</div>
+
+<!-- ===================== APP ===================== -->
+<div id="appScreen">
+  <div class="app">
+    <div class="topbar">
+      <p class="eyebrow">Diario de salud</p>
+      <h1 id="dogName">Cargando…</h1>
+      <p class="sub" id="topSub"></p>
+      <select class="pet-picker" id="petPicker" style="display:none;"></select>
+      <div class="pastillero" id="pastillero"></div>
+    </div>
+
+    <div class="content">
+
+      <!-- HOY -->
+      <div class="view active" id="view-hoy">
+        <div id="hoyBanner"></div>
+        <h2 class="section-title" id="hoyTitulo">Hoy</h2>
+        <div class="card" id="medsHoyCard">
+          <h3 style="margin-bottom:8px;">Medicación de hoy</h3>
+          <div id="medsHoyList"></div>
+        </div>
+        <div class="card">
+          <h3>Registro del día</h3>
+          <label>Síntomas / novedades</label>
+          <textarea id="logSintomas" placeholder="Ej: vomitó una vez a la mañana, comió normal el resto del día..."></textarea>
+          <div class="row">
+            <div>
+              <label>Apetito</label>
+              <select id="logApetito">
+                <option value="">Sin registrar</option><option value="bueno">Bueno</option><option value="regular">Regular</option><option value="malo">Malo</option>
+              </select>
+            </div>
+            <div>
+              <label>Ánimo</label>
+              <select id="logAnimo">
+                <option value="">Sin registrar</option><option value="bueno">Bueno / activo</option><option value="regular">Regular</option><option value="decaido">Decaído</option>
+              </select>
+            </div>
+          </div>
+          <label>Notas adicionales</label>
+          <textarea id="logNotas" placeholder="Cualquier otra cosa que quieras anotar..."></textarea>
+          <button class="primary" id="btnGuardarHoy">Guardar registro de este día</button>
+        </div>
+      </div>
+
+      <!-- MEDICACION -->
+      <div class="view" id="view-meds">
+        <h2 class="section-title">Medicación</h2>
+        <div id="medsListWrap"></div>
+        <div class="card">
+          <h3 id="medFormTitle">Agregar medicación</h3>
+          <label>Tipo de esquema</label>
+          <div class="segmented" id="medTipoSeg">
+            <button data-tipo="fijo" class="active">Dosis fija diaria</button>
+            <button data-tipo="variable">Cambia día a día</button>
+            <button data-tipo="recurrente">Se repite (ej. mensual)</button>
+          </div>
+          <label>Nombre de la medicación</label>
+          <input type="text" id="medNombre" placeholder="Ej: Meloxicam">
+          <label>Forma de ingesta</label>
+          <input type="text" id="medForma" placeholder="Ej: comprimido, jarabe, gotas, inyectable...">
+          <label>Fecha de inicio</label>
+          <input type="date" id="medFechaInicio">
+
+          <div id="medCamposFijo">
+            <label>Dosis (igual todos los días)</label>
+            <input type="text" id="medDosisFija" placeholder="Ej: 1/2 comprimido cada 12hs">
+            <div class="row">
+              <div><label>Duración (días)</label><input type="number" id="medDuracion" min="1" placeholder="Ej: 7"></div>
+              <div><label>o fecha de fin</label><input type="date" id="medFechaFinFijo"></div>
+            </div>
+            <p class="muted" id="medFinCalc"></p>
+          </div>
+          <div id="medCamposVariable" style="display:none;">
+            <p class="muted">Cargá la dosis de cada día del tratamiento.</p>
+            <div id="medDiasVariable"></div>
+            <button class="secondary" id="btnAgregarDiaVar" type="button">+ Agregar día</button>
+            <p class="muted" id="medFinCalcVar"></p>
+          </div>
+          <div id="medCamposRecurrente" style="display:none;">
+            <label>Dosis</label>
+            <input type="text" id="medDosisRec" placeholder="Ej: 1 comprimido desparasitario">
+            <label>Se repite cada (días)</label>
+            <input type="number" id="medIntervalo" min="1" placeholder="Ej: 30">
+            <p class="muted" id="medProximaCalc"></p>
+          </div>
+          <label>Notas (opcional)</label>
+          <textarea id="medNotas" placeholder="Indicaciones del veterinario, con o sin comida, etc."></textarea>
+          <button class="primary" id="btnGuardarMed">Guardar medicación</button>
+          <button class="secondary" id="btnCancelarEdicionMed" style="display:none;">Cancelar edición</button>
+        </div>
+      </div>
+
+      <!-- HISTORIAL -->
+      <div class="view" id="view-historial">
+        <h2 class="section-title">Historial</h2>
+        <div class="card" style="padding:12px 16px;">
+          <label style="margin:0 0 6px;">Ir a una fecha puntual</label>
+          <input type="date" id="histFechaPicker">
+        </div>
+        <div id="histList"></div>
+      </div>
+
+      <!-- AJUSTES -->
+      <div class="view" id="view-ajustes">
+        <h2 class="section-title">Ajustes</h2>
+
+        <div class="card">
+          <h3>Mascotas</h3>
+          <p class="muted">Tocá "Elegir" para ver esa mascota en Hoy / Medicación / Historial.</p>
+          <div id="petsList"></div>
+          <button class="secondary" id="btnAgregarMascota" type="button">+ Agregar mascota</button>
+        </div>
+
+        <div class="card">
+          <h3>Compartir con otro cuidador</h3>
+          <p class="muted" id="ownerInfo"></p>
+          <div id="ownerOnlyShare" style="display:none;">
+            <label>Código de tu hogar (compartíselo a la otra persona)</label>
+            <div class="id-box"><span id="householdIdText" class="mono"></span><button class="secondary" id="btnCopyId">Copiar</button></div>
+            <label>Agregar el email de Google de esa persona</label>
+            <input type="email" id="inputNuevoEmail" placeholder="nombre@gmail.com">
+            <button class="secondary" id="btnAgregarEmail" type="button">Autorizar este email</button>
+          </div>
+          <div id="emailsList" style="margin-top:10px;"></div>
+        </div>
+
+        <div class="card">
+          <h3>Recordatorio nocturno</h3>
+          <p class="muted">A qué hora te avisa (dentro de la app) si todavía no completaste el registro de hoy.</p>
+          <label>Hora del recordatorio</label>
+          <input type="time" id="settRecordHora" value="21:00">
+          <button class="primary" id="btnGuardarAjustes">Guardar</button>
+        </div>
+
+        <div class="card">
+          <h3>Notificaciones del navegador</h3>
+          <p class="muted">Si dejás esta pestaña abierta, puede avisarte con una notificación del navegador.</p>
+          <button class="secondary" id="btnActivarNotif">Activar notificaciones del navegador</button>
+          <p class="muted" id="notifStatus" style="margin-top:8px;"></p>
+        </div>
+
+        <div class="card">
+          <h3>Recordatorio en tu calendario</h3>
+          <p class="muted">Avisa aunque tengas el teléfono bloqueado: agrega un evento diario en tu calendario.</p>
+          <a class="link-btn primary-look" id="linkGCal" target="_blank" rel="noopener">Agregar a Google Calendar</a>
+          <a class="link-btn secondary-look" id="linkIcs" download="recordatorio-diario.ics">Descargar recordatorio (.ics)</a>
+        </div>
+
+        <div class="card">
+          <h3>Tu cuenta</h3>
+          <p class="muted" id="cuentaInfo"></p>
+          <button class="secondary" id="btnLogout" type="button">Cerrar sesión</button>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-view="hoy"><span class="ic">🐾</span>Hoy</button>
+      <button class="tab-btn" data-view="meds"><span class="ic">💊</span>Medicación</button>
+      <button class="tab-btn" data-view="historial"><span class="ic">📖</span>Historial</button>
+      <button class="tab-btn" data-view="ajustes"><span class="ic">⚙️</span>Ajustes</button>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
