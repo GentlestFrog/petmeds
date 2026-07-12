@@ -67,6 +67,9 @@ let selectedDate = todayStr();
 let editingMedId = null;
 let medTipoActual = 'fijo';
 let diasVariable = [];
+let horariosForm = [];
+let recDosisModo = 'fija';
+let vecesRecurrente = [];
 
 /* ==================== AUTENTICACIÓN ==================== */
 document.getElementById('btnGoogleLogin').addEventListener('click', async ()=>{
@@ -197,8 +200,35 @@ function dosisEnFecha(med, dateStr){
   if(diff<0) return null;
   if(med.tipo==='fijo'){ return diff <= (med.duracionDias||1)-1 ? med.dosisFija : null; }
   if(med.tipo==='variable'){ const arr=med.dosisPorDia||[]; return diff<arr.length ? arr[diff].dosis : null; }
-  if(med.tipo==='recurrente'){ const it=med.intervaloDias||1; return (diff % it === 0) ? med.dosisRec : null; }
+  if(med.tipo==='recurrente'){
+    const it = med.intervaloDias||1;
+    if(diff % it !== 0) return null;
+    if(med.dosisModo==='variable'){
+      const ocurrencia = Math.floor(diff/it)+1;
+      const arr = med.dosisPorCiclo||[];
+      if(arr.length===0) return null;
+      const idx = Math.min(ocurrencia-1, arr.length-1);
+      return arr[idx].dosis;
+    }
+    return med.dosisRec;
+  }
   return null;
+}
+function vezDeRecurrente(med, dateStr){
+  if(med.tipo!=='recurrente') return null;
+  const it = med.intervaloDias||1;
+  const diff = diffDays(med.fechaInicio, dateStr);
+  if(diff<0 || diff % it !== 0) return null;
+  return Math.floor(diff/it)+1;
+}
+function horariosDe(med){
+  return (med.horarios && med.horarios.length>0) ? med.horarios.slice().sort() : ['_default'];
+}
+function estaTomada(log, medId, horario){
+  const v = log.medicacionesTomadas && log.medicacionesTomadas[medId];
+  if(v==null) return false;
+  if(typeof v === 'boolean') return horario==='_default' ? v : false;
+  return !!v[horario];
 }
 function diaXdeY(med, dateStr){
   const diff = diffDays(med.fechaInicio, dateStr);
@@ -297,7 +327,17 @@ async function renderHoy(){
   const card = document.getElementById('medsHoyCard');
   const activos = meds.filter(m=>m.activo!==false);
   const delDia = [];
-  activos.forEach(m=>{ const dosis = dosisEnFecha(m, selectedDate); if(dosis) delDia.push({med:m, dosis}); });
+  activos.forEach(m=>{
+    const dosis = dosisEnFecha(m, selectedDate);
+    if(dosis){
+      horariosDe(m).forEach(h=>delDia.push({med:m, dosis, horario:h}));
+    }
+  });
+  delDia.sort((a,b)=>{
+    const ta = a.horario==='_default' ? '' : a.horario;
+    const tb = b.horario==='_default' ? '' : b.horario;
+    return ta.localeCompare(tb) || a.med.nombre.localeCompare(b.med.nombre);
+  });
 
   const log = (await loadLog(selectedDate)) || {fecha:selectedDate, sintomas:'', apetito:'', animo:'', notas:'', medicacionesTomadas:{}, completado:false};
 
@@ -305,14 +345,17 @@ async function renderHoy(){
   else{
     card.style.display='';
     listEl.innerHTML='';
-    delDia.forEach(({med,dosis})=>{
+    delDia.forEach(({med,dosis,horario})=>{
       const row = document.createElement('label');
       row.className='chk-row';
-      const checked = !!(log.medicacionesTomadas && log.medicacionesTomadas[med.id]);
+      const checked = estaTomada(log, med.id, horario);
       const diaInfo = diaXdeY(med, selectedDate);
-      const diaTxt = diaInfo ? ' · Día '+diaInfo.actual+' de '+diaInfo.total : '';
-      row.innerHTML = '<input type="checkbox" data-medid="'+med.id+'" '+(checked?'checked':'')+'>'+
-        '<div class="info"><b>'+escapeHtml(med.nombre)+'</b><div>'+escapeHtml(dosis)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+diaTxt+'</div></div>';
+      let diaTxt = '';
+      if(diaInfo) diaTxt = ' · Día '+diaInfo.actual+' de '+diaInfo.total;
+      else { const vez = vezDeRecurrente(med, selectedDate); if(vez) diaTxt = ' · Vez '+vez; }
+      const horarioTxt = horario!=='_default' ? escapeHtml(horario)+' · ' : '';
+      row.innerHTML = '<input type="checkbox" data-medid="'+med.id+'" data-horario="'+escapeHtml(horario)+'" '+(checked?'checked':'')+'>'+
+        '<div class="info"><b>'+escapeHtml(med.nombre)+'</b><div>'+horarioTxt+escapeHtml(dosis)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+diaTxt+'</div></div>';
       listEl.appendChild(row);
     });
   }
@@ -325,7 +368,11 @@ async function renderHoy(){
 
 async function guardarHoy(){
   const medsMarcados = {};
-  document.querySelectorAll('#medsHoyList input[type=checkbox]').forEach(chk=>{ medsMarcados[chk.dataset.medid]=chk.checked; });
+  document.querySelectorAll('#medsHoyList input[type=checkbox]').forEach(chk=>{
+    const mid = chk.dataset.medid, hor = chk.dataset.horario;
+    medsMarcados[mid] = medsMarcados[mid] || {};
+    medsMarcados[mid][hor] = chk.checked;
+  });
   const log = {
     fecha: selectedDate,
     sintomas: document.getElementById('logSintomas').value.trim(),
@@ -345,6 +392,9 @@ function resetMedForm(){
   editingMedId = null;
   medTipoActual = 'fijo';
   diasVariable = [{dia:1, dosis:''}];
+  horariosForm = [];
+  recDosisModo = 'fija';
+  vecesRecurrente = [{dosis:''}];
   document.getElementById('medFormTitle').textContent='Agregar medicación';
   document.getElementById('medNombre').value='';
   document.getElementById('medForma').value='';
@@ -357,8 +407,53 @@ function resetMedForm(){
   document.getElementById('medNotas').value='';
   document.getElementById('btnCancelarEdicionMed').style.display='none';
   setMedTipo('fijo');
+  setRecDosisModo('fija');
   renderDiasVariable();
+  renderHorariosForm();
+  renderVecesRecurrente();
   actualizarCalculos();
+}
+function setRecDosisModo(modo){
+  recDosisModo = modo;
+  document.querySelectorAll('#recDosisModoSeg button').forEach(b=>b.classList.toggle('active', b.dataset.modo===modo));
+  document.getElementById('recDosisFijaWrap').style.display = modo==='fija' ? '' : 'none';
+  document.getElementById('recDosisVariableWrap').style.display = modo==='variable' ? '' : 'none';
+  actualizarCalculos();
+}
+function renderHorariosForm(){
+  const cont = document.getElementById('medHorariosList');
+  cont.innerHTML='';
+  horariosForm.forEach((h,idx)=>{
+    const row=document.createElement('div');
+    row.className='med-day-row';
+    row.innerHTML = '<input type="time" value="'+h+'" data-idx="'+idx+'">'+
+      '<button type="button" class="icon-btn" data-remove="'+idx+'">✕</button>';
+    cont.appendChild(row);
+  });
+  cont.querySelectorAll('input[type=time]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{ horariosForm[+inp.dataset.idx]=inp.value; });
+  });
+  cont.querySelectorAll('[data-remove]').forEach(b=>{
+    b.addEventListener('click', ()=>{ horariosForm.splice(+b.dataset.remove,1); renderHorariosForm(); });
+  });
+}
+function renderVecesRecurrente(){
+  const cont = document.getElementById('medVecesRecurrente');
+  cont.innerHTML='';
+  vecesRecurrente.forEach((v,idx)=>{
+    const row=document.createElement('div');
+    row.className='med-day-row';
+    row.innerHTML = '<span class="dnum mono">Vez '+(idx+1)+'</span>'+
+      '<input type="text" placeholder="Dosis" value="'+escapeHtml(v.dosis)+'" data-idx="'+idx+'">'+
+      (vecesRecurrente.length>1 ? '<button type="button" class="icon-btn" data-remove="'+idx+'">✕</button>' : '');
+    cont.appendChild(row);
+  });
+  cont.querySelectorAll('input[type=text]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{ vecesRecurrente[+inp.dataset.idx].dosis=inp.value; actualizarCalculos(); });
+  });
+  cont.querySelectorAll('[data-remove]').forEach(b=>{
+    b.addEventListener('click', ()=>{ vecesRecurrente.splice(+b.dataset.remove,1); renderVecesRecurrente(); actualizarCalculos(); });
+  });
 }
 function setMedTipo(tipo){
   medTipoActual = tipo;
@@ -412,7 +507,14 @@ function actualizarCalculos(origen){
     const el = document.getElementById('medProximaCalc');
     if(it>0){
       const prox = proximaTomaRecurrente({fechaInicio:inicio, intervaloDias:it}, todayStr());
-      el.textContent = 'Se repite cada '+it+' días. Próxima toma: '+fmtHuman(prox)+'.';
+      let dosisTxt = '';
+      if(recDosisModo==='variable' && vecesRecurrente.length){
+        const diff = diffDays(inicio, prox);
+        const ocurrencia = Math.floor(diff/it)+1;
+        const idx = Math.min(ocurrencia-1, vecesRecurrente.length-1);
+        if(vecesRecurrente[idx] && vecesRecurrente[idx].dosis) dosisTxt = ' · '+vecesRecurrente[idx].dosis+' (vez '+ocurrencia+')';
+      }
+      el.textContent = 'Se repite cada '+it+' días. Próxima toma: '+fmtHuman(prox)+dosisTxt+'.';
     } else el.textContent='';
   }
 }
@@ -422,7 +524,8 @@ async function guardarMedForm(){
   const fechaInicio = document.getElementById('medFechaInicio').value || todayStr();
   const formaIngesta = document.getElementById('medForma').value.trim();
   const notas = document.getElementById('medNotas').value.trim();
-  let med = { id: editingMedId, nombre, formaIngesta, fechaInicio, notas, tipo: medTipoActual, activo:true };
+  const horarios = horariosForm.filter(h=>h);
+  let med = { id: editingMedId, nombre, formaIngesta, fechaInicio, notas, tipo: medTipoActual, activo:true, horarios };
 
   if(medTipoActual==='fijo'){
     const dur = +document.getElementById('medDuracion').value;
@@ -435,10 +538,17 @@ async function guardarMedForm(){
     med.dosisPorDia = diasVariable.map(d=>({dia:d.dia, dosis:d.dosis.trim()}));
   } else if(medTipoActual==='recurrente'){
     const it = +document.getElementById('medIntervalo').value;
-    const dosisRec = document.getElementById('medDosisRec').value.trim();
     if(!it || it<1){ toast('Indicá cada cuántos días se repite'); return; }
-    if(!dosisRec){ toast('Indicá la dosis'); return; }
-    med.intervaloDias = it; med.dosisRec = dosisRec;
+    med.intervaloDias = it;
+    med.dosisModo = recDosisModo;
+    if(recDosisModo==='fija'){
+      const dosisRec = document.getElementById('medDosisRec').value.trim();
+      if(!dosisRec){ toast('Indicá la dosis'); return; }
+      med.dosisRec = dosisRec;
+    } else {
+      if(vecesRecurrente.some(v=>!v.dosis.trim())){ toast('Completá la dosis de cada vez'); return; }
+      med.dosisPorCiclo = vecesRecurrente.map((v,i)=>({ciclo:i+1, dosis:v.dosis.trim()}));
+    }
   }
 
   const id = await saveMed(med);
@@ -456,6 +566,8 @@ function editarMed(id){
   document.getElementById('medForma').value=med.formaIngesta||'';
   document.getElementById('medFechaInicio').value=med.fechaInicio;
   document.getElementById('medNotas').value=med.notas||'';
+  horariosForm = (med.horarios||[]).slice();
+  renderHorariosForm();
   setMedTipo(med.tipo);
   if(med.tipo==='fijo'){
     document.getElementById('medDosisFija').value=med.dosisFija||'';
@@ -465,8 +577,15 @@ function editarMed(id){
     diasVariable = (med.dosisPorDia||[{dia:1,dosis:''}]).map(d=>({dia:d.dia, dosis:d.dosis}));
     renderDiasVariable();
   } else if(med.tipo==='recurrente'){
-    document.getElementById('medDosisRec').value=med.dosisRec||'';
     document.getElementById('medIntervalo').value=med.intervaloDias||'';
+    recDosisModo = med.dosisModo || 'fija';
+    if(recDosisModo==='fija'){
+      document.getElementById('medDosisRec').value=med.dosisRec||'';
+    } else {
+      vecesRecurrente = (med.dosisPorCiclo||[{dosis:''}]).map(v=>({dosis:v.dosis}));
+      renderVecesRecurrente();
+    }
+    setRecDosisModo(recDosisModo);
   }
   document.getElementById('btnCancelarEdicionMed').style.display='';
   actualizarCalculos();
@@ -498,6 +617,7 @@ function renderMedsList(){
     if(med.tipo==='recurrente'){
       const prox = proximaTomaRecurrente(med, hoy);
       infoFin = 'Próxima toma: <b>'+fmtHuman(prox)+'</b> · se repite cada '+med.intervaloDias+' días';
+      if(med.dosisModo==='variable') infoFin += ' · dosis varía según la vez';
     } else {
       const fin = fechaFinMed(med);
       const diasRest = diffDays(hoy, fin);
@@ -511,6 +631,7 @@ function renderMedsList(){
       '<span class="badge '+med.tipo+'">'+tipoLabel+'</span> '+(med.activo===false?'<span class="badge inactivo">Inactiva</span>':'')+'</div></div>'+
       '<p class="muted" style="margin:8px 0 2px;">Desde el '+fmtHuman(med.fechaInicio)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+'</p>'+
       '<p class="muted" style="margin:2px 0 10px;">'+infoFin+'</p>'+
+      (med.horarios && med.horarios.length ? '<p class="muted" style="margin:0 0 10px;">🕒 Horarios: '+med.horarios.slice().sort().join(', ')+'</p>' : '')+
       (med.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(med.notas)+'</p>' : '')+
       '<div style="display:flex; gap:14px;">'+
       '<button class="ghost-small" data-edit="'+med.id+'" style="color:var(--pine);">Editar</button>'+
@@ -709,11 +830,14 @@ async function render(){
 
 /* ==================== eventos formulario medicación ==================== */
 document.querySelectorAll('#medTipoSeg button').forEach(b=>b.addEventListener('click', ()=>setMedTipo(b.dataset.tipo)));
+document.querySelectorAll('#recDosisModoSeg button').forEach(b=>b.addEventListener('click', ()=>setRecDosisModo(b.dataset.modo)));
 document.getElementById('medFechaInicio').addEventListener('change', ()=>actualizarCalculos());
 document.getElementById('medDuracion').addEventListener('input', ()=>actualizarCalculos('dur'));
 document.getElementById('medFechaFinFijo').addEventListener('input', ()=>actualizarCalculos('fin'));
 document.getElementById('medIntervalo').addEventListener('input', ()=>actualizarCalculos());
 document.getElementById('btnAgregarDiaVar').addEventListener('click', ()=>{ diasVariable.push({dia:diasVariable.length+1, dosis:''}); renderDiasVariable(); actualizarCalculos(); });
+document.getElementById('btnAgregarHorario').addEventListener('click', ()=>{ horariosForm.push('08:00'); renderHorariosForm(); });
+document.getElementById('btnAgregarVezRec').addEventListener('click', ()=>{ vecesRecurrente.push({dosis:''}); renderVecesRecurrente(); actualizarCalculos(); });
 document.getElementById('btnGuardarMed').addEventListener('click', guardarMedForm);
 document.getElementById('btnCancelarEdicionMed').addEventListener('click', resetMedForm);
 document.getElementById('btnGuardarHoy').addEventListener('click', guardarHoy);

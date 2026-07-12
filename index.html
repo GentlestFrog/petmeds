@@ -255,11 +255,30 @@
           </div>
           <div id="medCamposRecurrente" style="display:none;">
             <label>Dosis</label>
-            <input type="text" id="medDosisRec" placeholder="Ej: 1 comprimido desparasitario">
+            <div class="segmented" id="recDosisModoSeg">
+              <button data-modo="fija" class="active">Fija siempre</button>
+              <button data-modo="variable">Cambia según la vez</button>
+            </div>
+            <div id="recDosisFijaWrap">
+              <input type="text" id="medDosisRec" placeholder="Ej: 1 comprimido desparasitario">
+            </div>
+            <div id="recDosisVariableWrap" style="display:none;">
+              <p class="muted">Cargá la dosis de cada vez que corresponda; la última que cargues se repite para siempre a partir de ahí.</p>
+              <div id="medVecesRecurrente"></div>
+              <button class="secondary" id="btnAgregarVezRec" type="button">+ Agregar otra vez</button>
+            </div>
             <label>Se repite cada (días)</label>
             <input type="number" id="medIntervalo" min="1" placeholder="Ej: 30">
             <p class="muted" id="medProximaCalc"></p>
           </div>
+
+          <div id="medHorariosWrap">
+            <label>Horarios de toma (opcional — agregá uno por cada toma diaria)</label>
+            <div id="medHorariosList"></div>
+            <button class="secondary" id="btnAgregarHorario" type="button">+ Agregar horario</button>
+            <p class="muted" style="margin-top:6px;">Si no cargás ninguno, se muestra como una sola toma sin horario específico.</p>
+          </div>
+
           <label>Notas (opcional)</label>
           <textarea id="medNotas" placeholder="Indicaciones del veterinario, con o sin comida, etc."></textarea>
           <button class="primary" id="btnGuardarMed">Guardar medicación</button>
