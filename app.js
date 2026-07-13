@@ -19,9 +19,22 @@ function fmtHuman(s){
   if(!s) return '';
   const d = parseDate(s);
   const dias=['dom','lun','mar','mié','jue','vie','sáb'];
-  const meses=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  return dias[d.getDay()]+' '+d.getDate()+' '+meses[d.getMonth()];
+  const dd=pad(d.getDate()), mm=pad(d.getMonth()+1), yyyy=d.getFullYear();
+  const fechaNum = (prefs.fecha==='mdy') ? (mm+'/'+dd+'/'+yyyy) : (dd+'/'+mm+'/'+yyyy);
+  return dias[d.getDay()]+' '+fechaNum;
 }
+function fmtHora(hhmm){
+  if(!hhmm || hhmm==='_default') return '';
+  if(prefs.hora!=='12h') return hhmm;
+  const [h,m] = hhmm.split(':').map(Number);
+  let h12 = h%12; if(h12===0) h12=12;
+  return h12+':'+pad(m)+' '+(h>=12?'PM':'AM');
+}
+function loadPrefs(){
+  const raw = localStorage_safe_get('prefs-'+currentUser.uid);
+  if(raw){ try{ prefs = Object.assign({fecha:'dmy',hora:'24h'}, JSON.parse(raw)); }catch(e){} }
+}
+function savePrefs(){ localStorage_safe_set('prefs-'+currentUser.uid, JSON.stringify(prefs)); }
 function escapeHtml(s){
   return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -41,6 +54,7 @@ function householdRef(){ return db.collection('households').doc(householdId); }
 function petsCol(){ return householdRef().collection('pets'); }
 function medsCol(petId){ return petsCol().doc(petId).collection('meds'); }
 function logsCol(petId){ return petsCol().doc(petId).collection('logs'); }
+function docsCol(petId){ return petsCol().doc(petId).collection('documentos'); }
 function userRef(uid){ return db.collection('users').doc(uid); }
 
 async function safeGetDoc(ref){
@@ -70,6 +84,10 @@ let diasVariable = [];
 let horariosForm = [];
 let recDosisModo = 'fija';
 let vecesRecurrente = [];
+let editingDocId = null;
+let docArchivoBase64 = null;
+let prefs = {fecha:'dmy', hora:'24h'};
+let weekStart = null;
 
 /* ==================== AUTENTICACIÓN ==================== */
 document.getElementById('btnGoogleLogin').addEventListener('click', async ()=>{
@@ -129,6 +147,8 @@ auth.onAuthStateChanged(async (user)=>{
 async function bootstrapApp(){
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('appScreen').style.display = 'block';
+  loadPrefs();
+  weekStart = mondayOf(todayStr());
   const h = await safeGetDoc(householdRef());
   isOwner = !!(h && h.owner === currentUser.uid);
   await loadPets();
@@ -279,30 +299,76 @@ function renderPetPicker(){
 document.getElementById('petPicker').addEventListener('change', (e)=>setActivePet(e.target.value));
 
 /* ==================== pastillero semanal ==================== */
+function mondayOf(dateStr){
+  const diaSemana = (parseDate(dateStr).getDay()+6)%7;
+  return addDays(dateStr, -diaSemana);
+}
+function capitalizar(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+
 async function renderPastillero(){
+  if(!weekStart) weekStart = mondayOf(todayStr());
   const cont = document.getElementById('pastillero');
-  cont.innerHTML = '';
   const hoy = todayStr();
-  const diaSemana = (parseDate(hoy).getDay()+6)%7;
-  const lunes = addDays(hoy, -diaSemana);
   const letras = ['L','M','M','J','V','S','D'];
-  for(let i=0;i<7;i++){
-    const ds = addDays(lunes, i);
+  const dias = [];
+  for(let i=0;i<7;i++) dias.push(addDays(weekStart, i));
+
+  const logs = await Promise.all(dias.map(ds => ds<=hoy ? loadLog(ds) : Promise.resolve(null)));
+
+  const frag = document.createDocumentFragment();
+  dias.forEach((ds,i)=>{
     const btn = document.createElement('div');
     btn.className = 'pill-day';
     if(ds===hoy) btn.classList.add('today');
     if(ds===selectedDate) btn.classList.add('selected');
     if(ds>hoy) btn.classList.add('future');
     if(ds<=hoy){
-      const log = await loadLog(ds);
+      const log = logs[i];
       if(log && log.completado) btn.classList.add('done');
       else if(ds<hoy) btn.classList.add('missed');
     }
     btn.innerHTML = '<span class="l">'+letras[i]+'</span><span class="n">'+parseDate(ds).getDate()+'</span><span class="dot"></span>';
     if(ds<=hoy) btn.addEventListener('click', ()=>{ selectedDate=ds; render(); });
-    cont.appendChild(btn);
-  }
+    frag.appendChild(btn);
+  });
+  cont.innerHTML = '';
+  cont.appendChild(frag);
+
+  const meses=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const dMes = parseDate(weekStart);
+  document.getElementById('mesBtnTexto').textContent = capitalizar(meses[dMes.getMonth()])+' '+dMes.getFullYear();
 }
+
+document.getElementById('mesBtn').addEventListener('click', ()=>{
+  const inp = document.getElementById('pastilleroJump');
+  inp.value = selectedDate;
+  try{ inp.showPicker(); }catch(e){ inp.click(); }
+});
+document.getElementById('pastilleroJump').addEventListener('change', (e)=>{
+  if(!e.target.value) return;
+  selectedDate = e.target.value;
+  weekStart = mondayOf(selectedDate);
+  render();
+});
+
+(function setupSwipeSemana(){
+  const el = document.getElementById('semanaWrap');
+  let startX=0, startY=0, tracking=false;
+  el.addEventListener('touchstart', (e)=>{
+    if(e.touches.length!==1) return;
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY; tracking = true;
+  }, {passive:true});
+  el.addEventListener('touchend', (e)=>{
+    if(!tracking) return;
+    tracking = false;
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    if(Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)*1.4){
+      weekStart = addDays(weekStart, dx<0 ? 7 : -7);
+      render();
+    }
+  }, {passive:true});
+})();
 
 /* ==================== vista Hoy ==================== */
 async function renderHoy(){
@@ -312,16 +378,6 @@ async function renderHoy(){
 
   const bannerWrap = document.getElementById('hoyBanner');
   bannerWrap.innerHTML = '';
-  if(esHoy){
-    const sett = await getSettings();
-    const [h,m] = (sett.hora||'21:00').split(':').map(Number);
-    const now = new Date();
-    const pasoLaHora = now.getHours()>h || (now.getHours()===h && now.getMinutes()>=m);
-    const logHoy = await loadLog(todayStr());
-    if(pasoLaHora && (!logHoy || !logHoy.completado)){
-      bannerWrap.innerHTML = '<div class="banner rust"><span>🔔</span><div><b>No olvides registrar el día de hoy</b>Ya pasaron las '+sett.hora+'. Completá aunque sea "todo normal".</div></div>';
-    }
-  }
 
   const listEl = document.getElementById('medsHoyList');
   const card = document.getElementById('medsHoyCard');
@@ -353,7 +409,7 @@ async function renderHoy(){
       let diaTxt = '';
       if(diaInfo) diaTxt = ' · Día '+diaInfo.actual+' de '+diaInfo.total;
       else { const vez = vezDeRecurrente(med, selectedDate); if(vez) diaTxt = ' · Vez '+vez; }
-      const horarioTxt = horario!=='_default' ? escapeHtml(horario)+' · ' : '';
+      const horarioTxt = horario!=='_default' ? escapeHtml(fmtHora(horario))+' · ' : '';
       row.innerHTML = '<input type="checkbox" data-medid="'+med.id+'" data-horario="'+escapeHtml(horario)+'" '+(checked?'checked':'')+'>'+
         '<div class="info"><b>'+escapeHtml(med.nombre)+'</b><div>'+horarioTxt+escapeHtml(dosis)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+diaTxt+'</div></div>';
       listEl.appendChild(row);
@@ -631,7 +687,7 @@ function renderMedsList(){
       '<span class="badge '+med.tipo+'">'+tipoLabel+'</span> '+(med.activo===false?'<span class="badge inactivo">Inactiva</span>':'')+'</div></div>'+
       '<p class="muted" style="margin:8px 0 2px;">Desde el '+fmtHuman(med.fechaInicio)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+'</p>'+
       '<p class="muted" style="margin:2px 0 10px;">'+infoFin+'</p>'+
-      (med.horarios && med.horarios.length ? '<p class="muted" style="margin:0 0 10px;">🕒 Horarios: '+med.horarios.slice().sort().join(', ')+'</p>' : '')+
+      (med.horarios && med.horarios.length ? '<p class="muted" style="margin:0 0 10px;">🕒 Horarios: '+med.horarios.slice().sort().map(fmtHora).join(', ')+'</p>' : '')+
       (med.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(med.notas)+'</p>' : '')+
       '<div style="display:flex; gap:14px;">'+
       '<button class="ghost-small" data-edit="'+med.id+'" style="color:var(--pine);">Editar</button>'+
@@ -666,6 +722,150 @@ async function renderHistorial(){
 document.getElementById('histFechaPicker').addEventListener('change', (e)=>{
   if(e.target.value){ selectedDate=e.target.value; switchView('hoy'); }
 });
+
+/* ==================== documentos (recetas / órdenes) ==================== */
+function compressImage(file, maxDim, maxChars){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w>h && w>maxDim){ h = Math.round(h*maxDim/w); w = maxDim; }
+        else if(h>=w && h>maxDim){ w = Math.round(w*maxDim/h); h = maxDim; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0,0,w,h);
+        ctx.drawImage(img, 0, 0, w, h);
+        let quality = 0.82;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        while(dataUrl.length > maxChars && quality > 0.3){
+          quality -= 0.12;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+        resolve(dataUrl);
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+document.getElementById('docArchivo').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  toast('Comprimiendo imagen...');
+  try{
+    docArchivoBase64 = await compressImage(file, 1600, 700000);
+    document.getElementById('docPreview').src = docArchivoBase64;
+    document.getElementById('docPreviewWrap').style.display = '';
+  }catch(err){
+    console.error(err);
+    toast('No se pudo procesar la imagen');
+  }
+});
+
+function resetDocForm(){
+  editingDocId = null;
+  docArchivoBase64 = null;
+  document.getElementById('docFormTitle').textContent = 'Subir un documento';
+  document.getElementById('docTitulo').value = '';
+  document.getElementById('docFecha').value = todayStr();
+  document.getElementById('docArchivo').value = '';
+  document.getElementById('docPreviewWrap').style.display = 'none';
+  document.getElementById('btnCancelarEdicionDoc').style.display = 'none';
+}
+
+async function guardarDocumento(){
+  const titulo = document.getElementById('docTitulo').value.trim();
+  const fecha = document.getElementById('docFecha').value || todayStr();
+  if(!titulo){ toast('Poné un título'); return; }
+  if(!editingDocId && !docArchivoBase64){ toast('Elegí una foto'); return; }
+
+  const data = {titulo, fecha};
+  if(docArchivoBase64) data.imagen = docArchivoBase64;
+
+  if(editingDocId){
+    await safeSetDoc(docsCol(activePetId).doc(editingDocId), data);
+    toast('Documento actualizado');
+  } else {
+    await docsCol(activePetId).add(data);
+    toast('Documento guardado');
+  }
+  resetDocForm();
+  renderDocumentos();
+}
+
+function editarDocumento(doc){
+  editingDocId = doc.id;
+  docArchivoBase64 = null;
+  document.getElementById('docFormTitle').textContent = 'Editar documento';
+  document.getElementById('docTitulo').value = doc.titulo;
+  document.getElementById('docFecha').value = doc.fecha;
+  document.getElementById('docArchivo').value = '';
+  document.getElementById('docPreview').src = doc.imagen;
+  document.getElementById('docPreviewWrap').style.display = '';
+  document.getElementById('btnCancelarEdicionDoc').style.display = '';
+  document.getElementById('docFormTitle').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+async function eliminarDocumento(id){
+  if(!confirm('¿Eliminar este documento?')) return;
+  await safeDeleteDoc(docsCol(activePetId).doc(id));
+  renderDocumentos();
+  toast('Documento eliminado');
+}
+
+async function renderDocumentos(){
+  const wrap = document.getElementById('docsListWrap');
+  if(!activePetId){ wrap.innerHTML=''; return; }
+  wrap.innerHTML = '<p class="muted">Cargando...</p>';
+  const docs = await safeListCol(docsCol(activePetId));
+  docs.sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+  if(docs.length===0){
+    wrap.innerHTML = '<div class="empty-state"><span class="big">📄</span>Todavía no subiste ningún documento.</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  docs.forEach(doc=>{
+    const card = document.createElement('div');
+    card.className = 'doc-card';
+    card.innerHTML =
+      '<img src="'+doc.imagen+'" data-view="'+doc.id+'">'+
+      '<div class="doc-info">'+
+        '<b>'+escapeHtml(doc.titulo)+'</b>'+
+        '<p class="muted" style="margin:2px 0 8px;">'+fmtHuman(doc.fecha)+'</p>'+
+        '<div style="display:flex; gap:14px;">'+
+          '<button class="ghost-small" data-edit="'+doc.id+'" style="color:var(--pine);">Editar</button>'+
+          '<button class="ghost-small" data-del="'+doc.id+'">Eliminar</button>'+
+        '</div>'+
+      '</div>';
+    wrap.appendChild(card);
+  });
+  wrap.querySelectorAll('img[data-view]').forEach(img=>{
+    img.addEventListener('click', ()=>{
+      const w = window.open();
+      if(w) w.document.write('<img src="'+img.src+'" style="max-width:100%;">');
+    });
+  });
+  wrap.querySelectorAll('[data-edit]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const doc = docs.find(d=>d.id===b.dataset.edit);
+      if(doc) editarDocumento(doc);
+    });
+  });
+  wrap.querySelectorAll('[data-del]').forEach(b=>{
+    b.addEventListener('click', ()=>eliminarDocumento(b.dataset.del));
+  });
+}
+document.getElementById('btnGuardarDoc').addEventListener('click', guardarDocumento);
+document.getElementById('btnCancelarEdicionDoc').addEventListener('click', resetDocForm);
+
+
 
 /* ==================== ajustes: mascotas ==================== */
 function renderPetsList(){
@@ -723,40 +923,80 @@ document.getElementById('btnAgregarEmail').addEventListener('click', async ()=>{
   renderCompartir();
 });
 
-/* ==================== ajustes: hora, notif, calendario ==================== */
-async function getSettings(){
-  const raw = localStorage_safe_get('settings-'+currentUser.uid);
-  if(raw){ try{ return JSON.parse(raw); }catch(e){} }
-  return {hora:'21:00'};
+/* ==================== consultas para el vet ==================== */
+function consultasCol(petId){ return petsCol().doc(petId).collection('consultas'); }
+
+document.getElementById('btnAgregarVet').addEventListener('click', async ()=>{
+  const txt = document.getElementById('vetTexto').value.trim();
+  if(!txt){ toast('Escribí algo primero'); return; }
+  await consultasCol(activePetId).add({texto:txt, resuelto:false, ts:Date.now()});
+  document.getElementById('vetTexto').value = '';
+  renderVet();
+});
+async function toggleConsulta(id, val){
+  await safeSetDoc(consultasCol(activePetId).doc(id), {resuelto:val});
+  renderVet();
+}
+async function eliminarConsulta(id){
+  if(!confirm('¿Eliminar este ítem?')) return;
+  await safeDeleteDoc(consultasCol(activePetId).doc(id));
+  renderVet();
+}
+async function renderVet(){
+  const wrap = document.getElementById('vetListWrap');
+  if(!activePetId){ wrap.innerHTML=''; return; }
+  wrap.innerHTML = '<p class="muted">Cargando...</p>';
+  const items = await safeListCol(consultasCol(activePetId));
+  items.sort((a,b)=> (a.resuelto===b.resuelto) ? ((a.ts||0)-(b.ts||0)) : (a.resuelto?1:-1));
+  if(items.length===0){
+    wrap.innerHTML = '<div class="empty-state"><span class="big">🩺</span>Todavía no agregaste nada para preguntarle al vet.</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  items.forEach(it=>{
+    const row = document.createElement('div');
+    row.className = 'vet-item';
+    row.innerHTML = '<input type="checkbox" data-id="'+it.id+'" '+(it.resuelto?'checked':'')+'>'+
+      '<span style="'+(it.resuelto?'text-decoration:line-through; color:var(--ink-soft);':'')+'">'+escapeHtml(it.texto)+'</span>'+
+      '<button class="icon-btn" data-del="'+it.id+'">✕</button>';
+    wrap.appendChild(row);
+  });
+  wrap.querySelectorAll('input[type=checkbox]').forEach(chk=>{
+    chk.addEventListener('change', ()=>toggleConsulta(chk.dataset.id, chk.checked));
+  });
+  wrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', ()=>eliminarConsulta(b.dataset.del)));
+}
+
+/* ==================== ajustes: formato y calendario ==================== */
+function getCalHora(){
+  return localStorage_safe_get('calHora-'+currentUser.uid) || '21:00';
 }
 async function renderAjustes(){
   renderPetsList();
   await renderCompartir();
-  const sett = await getSettings();
-  document.getElementById('settRecordHora').value = sett.hora || '21:00';
-  if('Notification' in window){
-    const perm = Notification.permission;
-    document.getElementById('notifStatus').textContent =
-      perm==='granted' ? 'Notificaciones activadas en este navegador.' :
-      perm==='denied' ? 'Bloqueaste las notificaciones para este sitio.' : 'Todavía no activaste las notificaciones.';
-  } else {
-    document.getElementById('notifStatus').textContent = 'Este navegador no soporta notificaciones.';
-  }
+  document.querySelectorAll('#prefFechaSeg button').forEach(b=>b.classList.toggle('active', b.dataset.val===prefs.fecha));
+  document.querySelectorAll('#prefHoraSeg button').forEach(b=>b.classList.toggle('active', b.dataset.val===prefs.hora));
+  document.getElementById('calRecordHora').value = getCalHora();
   document.getElementById('cuentaInfo').textContent = 'Conectado como '+currentUser.email;
   updateCalendarLinks();
 }
-document.getElementById('btnGuardarAjustes').addEventListener('click', ()=>{
-  const hora = document.getElementById('settRecordHora').value || '21:00';
-  localStorage_safe_set('settings-'+currentUser.uid, JSON.stringify({hora}));
-  toast('Ajustes guardados');
-  render();
+document.querySelectorAll('#prefFechaSeg button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    prefs.fecha = b.dataset.val;
+    savePrefs();
+    render();
+  });
 });
-document.getElementById('settRecordHora').addEventListener('input', updateCalendarLinks);
-document.getElementById('btnActivarNotif').addEventListener('click', async ()=>{
-  if(!('Notification' in window)){ toast('No soportado en este navegador'); return; }
-  const perm = await Notification.requestPermission();
-  if(perm==='granted') toast('¡Notificaciones activadas!');
-  renderAjustes();
+document.querySelectorAll('#prefHoraSeg button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    prefs.hora = b.dataset.val;
+    savePrefs();
+    render();
+  });
+});
+document.getElementById('calRecordHora').addEventListener('input', ()=>{
+  localStorage_safe_set('calHora-'+currentUser.uid, document.getElementById('calRecordHora').value || '21:00');
+  updateCalendarLinks();
 });
 
 function buildDateTimeStr(dateStr, timeStr){ return dateStr.replace(/-/g,'')+'T'+timeStr.replace(':','')+'00'; }
@@ -769,7 +1009,7 @@ function updateCalendarLinks(){
   const icsEl = document.getElementById('linkIcs');
   if(!gcalEl || !icsEl) return;
   const nombreTexto = pets.length>1 ? 'tus mascotas' : (getActivePet() ? getActivePet().nombre : 'tu mascota');
-  const horaInput = document.getElementById('settRecordHora').value || '21:00';
+  const horaInput = document.getElementById('calRecordHora').value || '21:00';
   const hoy = todayStr();
   const startStr = buildDateTimeStr(hoy, horaInput);
   const [hh,mm] = horaInput.split(':').map(Number);
@@ -785,24 +1025,6 @@ function updateCalendarLinks(){
   ].join('\r\n');
   icsEl.href = 'data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
 }
-
-let ultimoAvisoDia = null;
-setInterval(async ()=>{
-  if(!currentUser || !('Notification' in window) || Notification.permission!=='granted') return;
-  const sett = await getSettings();
-  const [h,m] = (sett.hora||'21:00').split(':').map(Number);
-  const now = new Date();
-  if(now.getHours()===h && now.getMinutes()===m){
-    const hoy = todayStr();
-    if(ultimoAvisoDia===hoy) return;
-    const log = await loadLog(hoy);
-    if(!log || !log.completado){
-      const nombreTexto = getActivePet() ? getActivePet().nombre : 'tu mascota';
-      new Notification('Diario de '+nombreTexto, {body:'No olvides registrar cómo estuvo hoy.'});
-      ultimoAvisoDia = hoy;
-    }
-  }
-}, 30000);
 
 /* ==================== navegación ==================== */
 function switchView(name){
@@ -823,6 +1045,8 @@ async function render(){
   if(activeView==='view-hoy') await renderHoy();
   if(activeView==='view-meds') renderMedsList();
   if(activeView==='view-historial') await renderHistorial();
+  if(activeView==='view-documentos') await renderDocumentos();
+  if(activeView==='view-vet') await renderVet();
   if(activeView==='view-ajustes') await renderAjustes();
   const totalMeds = meds.filter(m=>m.activo!==false).length;
   document.getElementById('topSub').textContent = totalMeds>0 ? totalMeds+' medicación'+(totalMeds===1?'':'es')+' activa'+(totalMeds===1?'':'s') : 'Sin medicación activa';

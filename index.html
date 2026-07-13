@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Diario de salud de Mascotas</title>
+<title>Diario de salud</title>
 
 <!-- iOS: agregar a inicio como app -->
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -67,7 +67,10 @@
   .pet-picker option{color:var(--ink);}
 
   /* ---------- pastillero ---------- */
-  .pastillero{display:flex; gap:7px; margin-top:16px; padding:10px; background:var(--pine-2); border-radius:14px;}
+  .mes-btn{background:none; border:none; color:var(--white); font-family:'Fraunces', serif; font-size:15px; font-weight:600; cursor:pointer; padding:0; margin-top:16px; display:flex; align-items:center; gap:5px;}
+  .mes-btn .mes-caret{font-size:10px; opacity:.75;}
+  .jump-hidden{position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;}
+  .pastillero{display:flex; gap:7px; margin-top:8px; padding:10px; background:var(--pine-2); border-radius:14px; touch-action:pan-y;}
   .pill-day{flex:1; display:flex; flex-direction:column; align-items:center; gap:5px; padding:8px 2px 9px; border-radius:11px; cursor:pointer; border:1.5px solid transparent; background:transparent; color:var(--sage-light); font-family:'IBM Plex Mono', monospace; transition:transform .15s ease;}
   .pill-day:hover{transform:translateY(-1px);}
   .pill-day .l{font-size:10px; letter-spacing:.05em; opacity:.85;}
@@ -146,6 +149,17 @@
   .dot-status{width:9px; height:9px; border-radius:50%; flex:none;}
   .dot-status.ok{background:var(--sage);} .dot-status.miss{background:var(--rust);}
 
+  .doc-card{display:flex; gap:12px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px; margin-bottom:12px;}
+  .doc-card img{width:64px; height:64px; object-fit:cover; border-radius:9px; flex:none; cursor:pointer; border:1px solid var(--line);}
+  .doc-card .doc-info{flex:1; min-width:0;}
+  .doc-card .doc-info input[type=text], .doc-card .doc-info input[type=date]{margin-top:4px;}
+  .doc-card .doc-info label{margin:8px 0 3px;}
+  .doc-card .doc-info label:first-child{margin-top:0;}
+
+  .vet-item{display:flex; gap:10px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px;}
+  .vet-item input[type=checkbox]{width:20px; height:20px; accent-color:var(--pine); flex:none; margin-top:2px;}
+  .vet-item span{flex:1; font-size:14px; line-height:1.4;}
+
   .pet-row{display:flex; align-items:center; gap:8px; margin-bottom:10px;}
   .pet-row input[type=text]{flex:1;}
   .pet-row .tag-activa{font-size:10px; font-family:'IBM Plex Mono', monospace; background:var(--sage-light); color:var(--pine-2); padding:4px 8px; border-radius:20px; flex:none; border:none; cursor:pointer;}
@@ -195,7 +209,11 @@
       <h1 id="dogName">Cargando…</h1>
       <p class="sub" id="topSub"></p>
       <select class="pet-picker" id="petPicker" style="display:none;"></select>
-      <div class="pastillero" id="pastillero"></div>
+      <div id="semanaWrap">
+        <button type="button" id="mesBtn" class="mes-btn"><span id="mesBtnTexto">—</span><span class="mes-caret">▾</span></button>
+        <input type="date" id="pastilleroJump" class="jump-hidden">
+        <div class="pastillero" id="pastillero"></div>
+      </div>
     </div>
 
     <div class="content">
@@ -309,6 +327,37 @@
         <div id="histList"></div>
       </div>
 
+      <!-- DOCUMENTOS -->
+      <div class="view" id="view-documentos">
+        <h2 class="section-title">Documentos</h2>
+        <div class="card">
+          <h3 id="docFormTitle">Subir un documento</h3>
+          <label>Título</label>
+          <input type="text" id="docTitulo" placeholder="Ej: Receta antibiótico, Orden de análisis...">
+          <label>Fecha</label>
+          <input type="date" id="docFecha">
+          <label>Foto</label>
+          <input type="file" id="docArchivo" accept="image/*">
+          <div id="docPreviewWrap" style="display:none; margin-top:10px;">
+            <img id="docPreview" style="width:100%; border-radius:10px; border:1px solid var(--line);">
+          </div>
+          <button class="primary" id="btnGuardarDoc">Guardar documento</button>
+          <button class="secondary" id="btnCancelarEdicionDoc" style="display:none;">Cancelar edición</button>
+        </div>
+        <div id="docsListWrap"></div>
+      </div>
+
+      <!-- VET -->
+      <div class="view" id="view-vet">
+        <h2 class="section-title">Para la próxima visita al vet</h2>
+        <div class="card">
+          <label>Agregar algo para preguntar o comentar</label>
+          <textarea id="vetTexto" placeholder="Ej: preguntar si puede bañarse esta semana"></textarea>
+          <button class="primary" id="btnAgregarVet">Agregar</button>
+        </div>
+        <div id="vetListWrap"></div>
+      </div>
+
       <!-- AJUSTES -->
       <div class="view" id="view-ajustes">
         <h2 class="section-title">Ajustes</h2>
@@ -334,23 +383,24 @@
         </div>
 
         <div class="card">
-          <h3>Recordatorio nocturno</h3>
-          <p class="muted">A qué hora te avisa (dentro de la app) si todavía no completaste el registro de hoy.</p>
-          <label>Hora del recordatorio</label>
-          <input type="time" id="settRecordHora" value="21:00">
-          <button class="primary" id="btnGuardarAjustes">Guardar</button>
-        </div>
-
-        <div class="card">
-          <h3>Notificaciones del navegador</h3>
-          <p class="muted">Si dejás esta pestaña abierta, puede avisarte con una notificación del navegador.</p>
-          <button class="secondary" id="btnActivarNotif">Activar notificaciones del navegador</button>
-          <p class="muted" id="notifStatus" style="margin-top:8px;"></p>
+          <h3>Formato de fecha y hora</h3>
+          <label>Fecha</label>
+          <div class="segmented" id="prefFechaSeg">
+            <button data-val="dmy" class="active">DD/MM/AAAA</button>
+            <button data-val="mdy">MM/DD/AAAA</button>
+          </div>
+          <label>Hora</label>
+          <div class="segmented" id="prefHoraSeg">
+            <button data-val="24h" class="active">24 hs</button>
+            <button data-val="12h">AM/PM</button>
+          </div>
         </div>
 
         <div class="card">
           <h3>Recordatorio en tu calendario</h3>
-          <p class="muted">Avisa aunque tengas el teléfono bloqueado: agrega un evento diario en tu calendario.</p>
+          <p class="muted">Avisa aunque tengas el teléfono bloqueado: agrega un evento diario en tu calendario a la hora que elijas.</p>
+          <label>Hora del recordatorio</label>
+          <input type="time" id="calRecordHora" value="21:00">
           <a class="link-btn primary-look" id="linkGCal" target="_blank" rel="noopener">Agregar a Google Calendar</a>
           <a class="link-btn secondary-look" id="linkIcs" download="recordatorio-diario.ics">Descargar recordatorio (.ics)</a>
         </div>
@@ -368,6 +418,8 @@
       <button class="tab-btn active" data-view="hoy"><span class="ic">🐾</span>Hoy</button>
       <button class="tab-btn" data-view="meds"><span class="ic">💊</span>Medicación</button>
       <button class="tab-btn" data-view="historial"><span class="ic">📖</span>Historial</button>
+      <button class="tab-btn" data-view="documentos"><span class="ic">📄</span>Docs</button>
+      <button class="tab-btn" data-view="vet"><span class="ic">🩺</span>Vet</button>
       <button class="tab-btn" data-view="ajustes"><span class="ic">⚙️</span>Ajustes</button>
     </div>
     <div class="toast" id="toast"></div>
