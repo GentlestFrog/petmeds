@@ -85,7 +85,6 @@ let horariosForm = [];
 let recDosisModo = 'fija';
 let vecesRecurrente = [];
 let editingDocId = null;
-let docArchivoBase64 = null;
 let prefs = {fecha:'dmy', hora:'24h'};
 let weekStart = null;
 
@@ -661,44 +660,93 @@ async function eliminarMed(id){
   renderMedsList();
   toast('Medicación eliminada');
 }
+let inactivasAbiertas = false;
+
+function estaFinalizada(med, hoy){
+  if(med.tipo==='recurrente') return false;
+  const fin = fechaFinMed(med);
+  return !!(fin && hoy > fin);
+}
+
+function medCardHtml(med, hoy){
+  let infoFin='';
+  const finalizada = estaFinalizada(med, hoy);
+  if(med.tipo==='recurrente'){
+    const prox = proximaTomaRecurrente(med, hoy);
+    infoFin = 'Próxima toma: <b>'+fmtHuman(prox)+'</b> · se repite cada '+med.intervaloDias+' días';
+    if(med.dosisModo==='variable') infoFin += ' · dosis varía según la vez';
+  } else {
+    const fin = fechaFinMed(med);
+    const diasRest = diffDays(hoy, fin);
+    const diaInfo = diaXdeY(med, hoy);
+    const diaTxt = diaInfo ? ' · hoy es el día '+diaInfo.actual+' de '+diaInfo.total : '';
+    infoFin = diasRest>=0 ? 'Hasta el <b>'+fmtHuman(fin)+'</b> · quedan '+diasRest+' día'+(diasRest===1?'':'s')+diaTxt : 'Finalizó el '+fmtHuman(fin);
+  }
+  const tipoLabel = med.tipo==='fijo'?'Fija':med.tipo==='variable'?'Variable':'Recurrente';
+  const badgeEstado = med.activo===false ? '<span class="badge inactivo">Inactiva</span>' : (finalizada ? '<span class="badge finalizada">Finalizada</span>' : '');
+  return '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><div><h3>'+escapeHtml(med.nombre)+'</h3>'+
+    '<span class="badge '+med.tipo+'">'+tipoLabel+'</span> '+badgeEstado+'</div></div>'+
+    '<p class="muted" style="margin:8px 0 2px;">Desde el '+fmtHuman(med.fechaInicio)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+'</p>'+
+    '<p class="muted" style="margin:2px 0 10px;">'+infoFin+'</p>'+
+    (med.horarios && med.horarios.length ? '<p class="muted" style="margin:0 0 10px;">🕒 Horarios: '+med.horarios.slice().sort().map(fmtHora).join(', ')+'</p>' : '')+
+    (med.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(med.notas)+'</p>' : '')+
+    '<div style="display:flex; gap:14px;">'+
+    '<button class="ghost-small" data-edit="'+med.id+'" style="color:var(--pine);">Editar</button>'+
+    '<button class="ghost-small" data-toggle="'+med.id+'" style="color:var(--ink-soft);">'+(med.activo===false?'Reactivar':'Marcar inactiva')+'</button>'+
+    '<button class="ghost-small" data-del="'+med.id+'">Eliminar</button></div>';
+}
+
+function wireMedCardButtons(container){
+  container.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editarMed(b.dataset.edit)));
+  container.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>toggleActivoMed(b.dataset.toggle)));
+  container.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ if(confirm('¿Eliminar esta medicación del registro?')) eliminarMed(b.dataset.del); }));
+}
+
 function renderMedsList(){
   const wrap = document.getElementById('medsListWrap');
-  wrap.innerHTML='';
-  if(meds.length===0){ wrap.innerHTML='<div class="empty-state"><span class="big">💊</span>Todavía no cargaste ninguna medicación.</div>'; return; }
   const hoy = todayStr();
-  meds.forEach(med=>{
-    const card = document.createElement('div');
-    card.className='card';
-    let infoFin='';
-    if(med.tipo==='recurrente'){
-      const prox = proximaTomaRecurrente(med, hoy);
-      infoFin = 'Próxima toma: <b>'+fmtHuman(prox)+'</b> · se repite cada '+med.intervaloDias+' días';
-      if(med.dosisModo==='variable') infoFin += ' · dosis varía según la vez';
-    } else {
-      const fin = fechaFinMed(med);
-      const diasRest = diffDays(hoy, fin);
-      const diaInfo = diaXdeY(med, hoy);
-      const diaTxt = diaInfo ? ' · hoy es el día '+diaInfo.actual+' de '+diaInfo.total : '';
-      infoFin = diasRest>=0 ? 'Hasta el <b>'+fmtHuman(fin)+'</b> · quedan '+diasRest+' día'+(diasRest===1?'':'s')+diaTxt : 'Finalizó el '+fmtHuman(fin);
-    }
-    const tipoLabel = med.tipo==='fijo'?'Fija':med.tipo==='variable'?'Variable':'Recurrente';
-    card.innerHTML =
-      '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><div><h3>'+escapeHtml(med.nombre)+'</h3>'+
-      '<span class="badge '+med.tipo+'">'+tipoLabel+'</span> '+(med.activo===false?'<span class="badge inactivo">Inactiva</span>':'')+'</div></div>'+
-      '<p class="muted" style="margin:8px 0 2px;">Desde el '+fmtHuman(med.fechaInicio)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+'</p>'+
-      '<p class="muted" style="margin:2px 0 10px;">'+infoFin+'</p>'+
-      (med.horarios && med.horarios.length ? '<p class="muted" style="margin:0 0 10px;">🕒 Horarios: '+med.horarios.slice().sort().map(fmtHora).join(', ')+'</p>' : '')+
-      (med.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(med.notas)+'</p>' : '')+
-      '<div style="display:flex; gap:14px;">'+
-      '<button class="ghost-small" data-edit="'+med.id+'" style="color:var(--pine);">Editar</button>'+
-      '<button class="ghost-small" data-toggle="'+med.id+'" style="color:var(--ink-soft);">'+(med.activo===false?'Reactivar':'Marcar inactiva')+'</button>'+
-      '<button class="ghost-small" data-del="'+med.id+'">Eliminar</button></div>';
-    wrap.appendChild(card);
-  });
-  wrap.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editarMed(b.dataset.edit)));
-  wrap.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>toggleActivoMed(b.dataset.toggle)));
-  wrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ if(confirm('¿Eliminar esta medicación del registro?')) eliminarMed(b.dataset.del); }));
+  const activas = meds.filter(m=>m.activo!==false && !estaFinalizada(m, hoy));
+  const inactivas = meds.filter(m=>m.activo===false || estaFinalizada(m, hoy));
+
+  wrap.innerHTML='';
+  if(activas.length===0){
+    wrap.innerHTML = meds.length===0
+      ? '<div class="empty-state"><span class="big">💊</span>Todavía no cargaste ninguna medicación.</div>'
+      : '<div class="empty-state"><span class="big">💊</span>No hay medicaciones activas ahora mismo.</div>';
+  } else {
+    activas.forEach(med=>{
+      const card = document.createElement('div');
+      card.className='card';
+      card.innerHTML = medCardHtml(med, hoy);
+      wrap.appendChild(card);
+    });
+  }
+  wireMedCardButtons(wrap);
+
+  const inactivasWrap = document.getElementById('medsInactivasWrap');
+  const inactivasList = document.getElementById('medsInactivasList');
+  const toggleBtn = document.getElementById('btnToggleInactivas');
+  if(inactivas.length===0){
+    inactivasWrap.style.display = 'none';
+  } else {
+    inactivasWrap.style.display = '';
+    document.getElementById('inactivasToggleTexto').textContent = 'Medicaciones inactivas ('+inactivas.length+')';
+    toggleBtn.classList.toggle('open', inactivasAbiertas);
+    inactivasList.style.display = inactivasAbiertas ? '' : 'none';
+    inactivasList.innerHTML = '';
+    inactivas.forEach(med=>{
+      const card = document.createElement('div');
+      card.className='card';
+      card.innerHTML = medCardHtml(med, hoy);
+      inactivasList.appendChild(card);
+    });
+    wireMedCardButtons(inactivasList);
+  }
 }
+document.getElementById('btnToggleInactivas').addEventListener('click', ()=>{
+  inactivasAbiertas = !inactivasAbiertas;
+  renderMedsList();
+});
 
 /* ==================== vista Historial ==================== */
 async function renderHistorial(){
@@ -724,6 +772,8 @@ document.getElementById('histFechaPicker').addEventListener('change', (e)=>{
 });
 
 /* ==================== documentos (recetas / órdenes) ==================== */
+let docArchivos = [];
+
 function compressImage(file, maxDim, maxChars){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -754,29 +804,76 @@ function compressImage(file, maxDim, maxChars){
     reader.readAsDataURL(file);
   });
 }
+function readFileAsDataUrl(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function procesarArchivoDoc(file){
+  if(file.type === 'application/pdf'){
+    const dataUrl = await readFileAsDataUrl(file);
+    if(dataUrl.length > 900000){
+      toast('El PDF "'+file.name+'" es muy pesado, no se agregó');
+      return null;
+    }
+    return {tipo:'pdf', nombre:file.name, data:dataUrl};
+  } else if(file.type.startsWith('image/')){
+    const dataUrl = await compressImage(file, 1600, 500000);
+    return {tipo:'image', nombre:file.name, data:dataUrl};
+  }
+  toast('Tipo de archivo no soportado: '+file.name);
+  return null;
+}
+
+function renderDocPreview(){
+  const wrap = document.getElementById('docPreviewWrap');
+  const list = document.getElementById('docPreviewList');
+  if(docArchivos.length===0){ wrap.style.display='none'; list.innerHTML=''; return; }
+  wrap.style.display = '';
+  list.innerHTML = docArchivos.map((a,idx)=>{
+    if(a.tipo==='pdf'){
+      return '<div class="doc-attach-pdf"><span>📄</span><span class="doc-attach-name">'+escapeHtml(a.nombre)+'</span><button type="button" class="doc-attach-remove" data-remove="'+idx+'">✕</button></div>';
+    }
+    return '<div class="doc-attach-img"><img src="'+a.data+'"><button type="button" class="doc-attach-remove" data-remove="'+idx+'">✕</button></div>';
+  }).join('');
+  list.querySelectorAll('[data-remove]').forEach(b=>{
+    b.addEventListener('click', ()=>{ docArchivos.splice(+b.dataset.remove,1); renderDocPreview(); });
+  });
+}
 
 document.getElementById('docArchivo').addEventListener('change', async (e)=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  toast('Comprimiendo imagen...');
-  try{
-    docArchivoBase64 = await compressImage(file, 1600, 700000);
-    document.getElementById('docPreview').src = docArchivoBase64;
-    document.getElementById('docPreviewWrap').style.display = '';
-  }catch(err){
-    console.error(err);
-    toast('No se pudo procesar la imagen');
+  const files = Array.from(e.target.files || []);
+  if(files.length===0) return;
+  for(const file of files){
+    const totalActual = docArchivos.reduce((sum,a)=>sum+a.data.length,0);
+    if(totalActual > 950000){
+      toast('Ya alcanzaste el límite de tamaño para este documento');
+      break;
+    }
+    toast('Procesando '+file.name+'...');
+    try{
+      const item = await procesarArchivoDoc(file);
+      if(item) docArchivos.push(item);
+    }catch(err){
+      console.error(err);
+      toast('No se pudo procesar '+file.name);
+    }
   }
+  renderDocPreview();
+  e.target.value = '';
 });
 
 function resetDocForm(){
   editingDocId = null;
-  docArchivoBase64 = null;
+  docArchivos = [];
   document.getElementById('docFormTitle').textContent = 'Subir un documento';
   document.getElementById('docTitulo').value = '';
   document.getElementById('docFecha').value = todayStr();
   document.getElementById('docArchivo').value = '';
-  document.getElementById('docPreviewWrap').style.display = 'none';
+  renderDocPreview();
   document.getElementById('btnCancelarEdicionDoc').style.display = 'none';
 }
 
@@ -784,11 +881,9 @@ async function guardarDocumento(){
   const titulo = document.getElementById('docTitulo').value.trim();
   const fecha = document.getElementById('docFecha').value || todayStr();
   if(!titulo){ toast('Poné un título'); return; }
-  if(!editingDocId && !docArchivoBase64){ toast('Elegí una foto'); return; }
+  if(docArchivos.length===0){ toast('Elegí al menos un archivo'); return; }
 
-  const data = {titulo, fecha};
-  if(docArchivoBase64) data.imagen = docArchivoBase64;
-
+  const data = {titulo, fecha, archivos: docArchivos};
   if(editingDocId){
     await safeSetDoc(docsCol(activePetId).doc(editingDocId), data);
     toast('Documento actualizado');
@@ -802,13 +897,12 @@ async function guardarDocumento(){
 
 function editarDocumento(doc){
   editingDocId = doc.id;
-  docArchivoBase64 = null;
+  docArchivos = (doc.archivos || (doc.imagen ? [{tipo:'image', nombre:'imagen', data:doc.imagen}] : [])).slice();
   document.getElementById('docFormTitle').textContent = 'Editar documento';
   document.getElementById('docTitulo').value = doc.titulo;
   document.getElementById('docFecha').value = doc.fecha;
   document.getElementById('docArchivo').value = '';
-  document.getElementById('docPreview').src = doc.imagen;
-  document.getElementById('docPreviewWrap').style.display = '';
+  renderDocPreview();
   document.getElementById('btnCancelarEdicionDoc').style.display = '';
   document.getElementById('docFormTitle').scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -818,6 +912,25 @@ async function eliminarDocumento(id){
   await safeDeleteDoc(docsCol(activePetId).doc(id));
   renderDocumentos();
   toast('Documento eliminado');
+}
+
+function abrirDocumento(doc){
+  const archivos = doc.archivos || (doc.imagen ? [{tipo:'image', nombre:'imagen', data:doc.imagen}] : []);
+  const w = window.open();
+  if(!w) return;
+  let html = '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>'+escapeHtml(doc.titulo)+'</title></head>'+
+    '<body style="margin:0; background:#22302A; font-family:sans-serif;">'+
+    '<h3 style="color:#fff; padding:14px; margin:0;">'+escapeHtml(doc.titulo)+' · '+fmtHuman(doc.fecha)+'</h3>';
+  archivos.forEach(a=>{
+    if(a.tipo==='pdf'){
+      html += '<div style="padding:6px 14px;"><a href="'+a.data+'" download="'+escapeHtml(a.nombre)+'" style="color:#C9D3C2;">📄 Abrir / descargar '+escapeHtml(a.nombre)+'</a></div>'+
+        '<embed src="'+a.data+'" type="application/pdf" style="width:100%; height:80vh; border:none; margin-bottom:14px;">';
+    } else {
+      html += '<img src="'+a.data+'" style="width:100%; display:block; margin-bottom:10px;">';
+    }
+  });
+  html += '</body></html>';
+  w.document.write(html);
 }
 
 async function renderDocumentos(){
@@ -832,13 +945,17 @@ async function renderDocumentos(){
   }
   wrap.innerHTML = '';
   docs.forEach(doc=>{
+    const archivos = doc.archivos || (doc.imagen ? [{tipo:'image', nombre:'imagen', data:doc.imagen}] : []);
+    const primero = archivos[0];
+    const thumbHtml = (primero && primero.tipo!=='pdf') ? '<img src="'+primero.data+'">' : '<div class="doc-thumb-pdf">📄</div>';
+    const badge = archivos.length>1 ? '<span class="doc-thumb-badge">+'+(archivos.length-1)+'</span>' : '';
     const card = document.createElement('div');
     card.className = 'doc-card';
     card.innerHTML =
-      '<img src="'+doc.imagen+'" data-view="'+doc.id+'">'+
+      '<div class="doc-thumb-wrap" data-open="'+doc.id+'">'+thumbHtml+badge+'</div>'+
       '<div class="doc-info">'+
         '<b>'+escapeHtml(doc.titulo)+'</b>'+
-        '<p class="muted" style="margin:2px 0 8px;">'+fmtHuman(doc.fecha)+'</p>'+
+        '<p class="muted" style="margin:2px 0 8px;">'+fmtHuman(doc.fecha)+(archivos.length>1?' · '+archivos.length+' archivos':'')+'</p>'+
         '<div style="display:flex; gap:14px;">'+
           '<button class="ghost-small" data-edit="'+doc.id+'" style="color:var(--pine);">Editar</button>'+
           '<button class="ghost-small" data-del="'+doc.id+'">Eliminar</button>'+
@@ -846,10 +963,10 @@ async function renderDocumentos(){
       '</div>';
     wrap.appendChild(card);
   });
-  wrap.querySelectorAll('img[data-view]').forEach(img=>{
-    img.addEventListener('click', ()=>{
-      const w = window.open();
-      if(w) w.document.write('<img src="'+img.src+'" style="max-width:100%;">');
+  wrap.querySelectorAll('[data-open]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const doc = docs.find(d=>d.id===el.dataset.open);
+      if(doc) abrirDocumento(doc);
     });
   });
   wrap.querySelectorAll('[data-edit]').forEach(b=>{

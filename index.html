@@ -133,6 +133,15 @@
   .badge.variable{background:#DCC98F; color:var(--pine-2);}
   .badge.recurrente{background:#C3D6E6; color:#264A63;}
   .badge.inactivo{background:var(--paper-2); color:var(--ink-soft);}
+  .badge.finalizada{background:#E3D9C2; color:#6B5A34;}
+
+  .collapsible-toggle{
+    width:100%; display:flex; align-items:center; justify-content:space-between;
+    background:none; border:none; border-top:1px solid var(--line); padding:14px 2px;
+    font-size:13.5px; font-weight:600; color:var(--ink-soft); cursor:pointer;
+  }
+  .collapsible-toggle .mes-caret{transition:transform .2s ease; font-size:11px;}
+  .collapsible-toggle.open .mes-caret{transform:rotate(180deg);}
 
   .chk-row{display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);}
   .chk-row:last-child{border-bottom:none;}
@@ -150,11 +159,21 @@
   .dot-status.ok{background:var(--sage);} .dot-status.miss{background:var(--rust);}
 
   .doc-card{display:flex; gap:12px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px; margin-bottom:12px;}
-  .doc-card img{width:64px; height:64px; object-fit:cover; border-radius:9px; flex:none; cursor:pointer; border:1px solid var(--line);}
   .doc-card .doc-info{flex:1; min-width:0;}
   .doc-card .doc-info input[type=text], .doc-card .doc-info input[type=date]{margin-top:4px;}
   .doc-card .doc-info label{margin:8px 0 3px;}
   .doc-card .doc-info label:first-child{margin-top:0;}
+  .doc-thumb-wrap{position:relative; width:64px; height:64px; flex:none; cursor:pointer;}
+  .doc-thumb-wrap img{width:100%; height:100%; object-fit:cover; border-radius:9px; border:1px solid var(--line);}
+  .doc-thumb-pdf{width:64px; height:64px; border-radius:9px; border:1px solid var(--line); background:var(--paper-2); display:flex; align-items:center; justify-content:center; font-size:26px;}
+  .doc-thumb-badge{position:absolute; bottom:-4px; right:-4px; background:var(--pine); color:var(--white); font-size:10px; font-family:'IBM Plex Mono', monospace; padding:2px 5px; border-radius:20px;}
+  .doc-attach-list{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;}
+  .doc-attach-img{position:relative; width:64px; height:64px;}
+  .doc-attach-img img{width:100%; height:100%; object-fit:cover; border-radius:8px; border:1px solid var(--line);}
+  .doc-attach-pdf{position:relative; display:flex; align-items:center; gap:6px; background:var(--paper-2); border-radius:8px; padding:6px 22px 6px 10px; font-size:12px; max-width:150px;}
+  .doc-attach-pdf .doc-attach-name{max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .doc-attach-remove{position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; background:var(--rust); color:var(--white); border:none; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+  .doc-attach-pdf .doc-attach-remove{top:2px; right:2px; width:16px; height:16px; font-size:9px;}
 
   .vet-item{display:flex; gap:10px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px;}
   .vet-item input[type=checkbox]{width:20px; height:20px; accent-color:var(--pine); flex:none; margin-top:2px;}
@@ -315,6 +334,14 @@
           <button class="primary" id="btnGuardarMed">Guardar medicación</button>
           <button class="secondary" id="btnCancelarEdicionMed" style="display:none;">Cancelar edición</button>
         </div>
+
+        <div id="medsInactivasWrap" style="display:none;">
+          <button type="button" class="collapsible-toggle" id="btnToggleInactivas">
+            <span id="inactivasToggleTexto">Medicaciones inactivas</span>
+            <span class="mes-caret" id="inactivasCaret">▾</span>
+          </button>
+          <div id="medsInactivasList" style="display:none;"></div>
+        </div>
       </div>
 
       <!-- HISTORIAL -->
@@ -336,10 +363,10 @@
           <input type="text" id="docTitulo" placeholder="Ej: Receta antibiótico, Orden de análisis...">
           <label>Fecha</label>
           <input type="date" id="docFecha">
-          <label>Foto</label>
-          <input type="file" id="docArchivo" accept="image/*">
-          <div id="docPreviewWrap" style="display:none; margin-top:10px;">
-            <img id="docPreview" style="width:100%; border-radius:10px; border:1px solid var(--line);">
+          <label>Fotos o PDFs (podés elegir varios)</label>
+          <input type="file" id="docArchivo" accept="image/*,application/pdf" multiple>
+          <div id="docPreviewWrap" style="display:none;">
+            <div id="docPreviewList" class="doc-attach-list"></div>
           </div>
           <button class="primary" id="btnGuardarDoc">Guardar documento</button>
           <button class="secondary" id="btnCancelarEdicionDoc" style="display:none;">Cancelar edición</button>
