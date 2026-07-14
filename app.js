@@ -931,22 +931,35 @@ async function eliminarDocumento(id){
 
 function abrirDocumento(doc){
   const archivos = doc.archivos || (doc.imagen ? [{tipo:'image', nombre:'imagen', data:doc.imagen}] : []);
-  const w = window.open();
-  if(!w) return;
-  let html = '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>'+escapeHtml(doc.titulo)+'</title></head>'+
-    '<body style="margin:0; background:#22302A; font-family:sans-serif;">'+
-    '<h3 style="color:#fff; padding:14px; margin:0;">'+escapeHtml(doc.titulo)+' · '+fmtHuman(doc.fecha)+'</h3>';
+  document.getElementById('docViewerTitulo').textContent = doc.titulo+' · '+fmtHuman(doc.fecha);
+  const body = document.getElementById('docViewerBody');
+  body.innerHTML = '';
   archivos.forEach(a=>{
     if(a.tipo==='pdf'){
-      html += '<div style="padding:6px 14px;"><a href="'+a.data+'" download="'+escapeHtml(a.nombre)+'" style="color:#C9D3C2;">📄 Abrir / descargar '+escapeHtml(a.nombre)+'</a></div>'+
-        '<embed src="'+a.data+'" type="application/pdf" style="width:100%; height:80vh; border:none; margin-bottom:14px;">';
+      const link = document.createElement('a');
+      link.className = 'doc-viewer-pdf-link';
+      link.href = a.data;
+      link.download = a.nombre;
+      link.textContent = '📄 Descargar '+a.nombre;
+      body.appendChild(link);
+      const embed = document.createElement('embed');
+      embed.src = a.data;
+      embed.type = 'application/pdf';
+      body.appendChild(embed);
     } else {
-      html += '<img src="'+a.data+'" style="width:100%; display:block; margin-bottom:10px;">';
+      const img = document.createElement('img');
+      img.src = a.data;
+      body.appendChild(img);
     }
   });
-  html += '</body></html>';
-  w.document.write(html);
+  document.getElementById('docViewerOverlay').style.display = 'block';
+  window.scrollTo(0,0);
 }
+function cerrarDocViewer(){
+  document.getElementById('docViewerOverlay').style.display = 'none';
+  document.getElementById('docViewerBody').innerHTML = '';
+}
+document.getElementById('btnCerrarDocViewer').addEventListener('click', cerrarDocViewer);
 
 async function renderDocumentos(){
   const wrap = document.getElementById('docsListWrap');
