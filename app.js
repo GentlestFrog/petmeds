@@ -185,10 +185,15 @@ async function setActivePet(id){
   await render();
 }
 async function agregarMascota(){
-  const ref = await petsCol().add({nombre:'Nueva mascota'});
-  await loadPets();
-  await setActivePet(ref.id);
-  renderPetsList();
+  try{
+    const ref = await petsCol().add({nombre:'Nueva mascota'});
+    await loadPets();
+    await setActivePet(ref.id);
+    renderPetsList();
+  }catch(err){
+    console.error(err);
+    toast('No se pudo agregar la mascota (revisá tu conexión)');
+  }
 }
 async function renombrarMascota(id, nombre){
   await safeSetDoc(petsCol().doc(id), {nombre: nombre || 'Mascota'});
@@ -815,13 +820,13 @@ function readFileAsDataUrl(file){
 async function procesarArchivoDoc(file){
   if(file.type === 'application/pdf'){
     const dataUrl = await readFileAsDataUrl(file);
-    if(dataUrl.length > 900000){
+    if(dataUrl.length > 700000){
       toast('El PDF "'+file.name+'" es muy pesado, no se agregó');
       return null;
     }
     return {tipo:'pdf', nombre:file.name, data:dataUrl};
   } else if(file.type.startsWith('image/')){
-    const dataUrl = await compressImage(file, 1600, 500000);
+    const dataUrl = await compressImage(file, 1400, 320000);
     return {tipo:'image', nombre:file.name, data:dataUrl};
   }
   toast('Tipo de archivo no soportado: '+file.name);
@@ -849,7 +854,7 @@ document.getElementById('docArchivo').addEventListener('change', async (e)=>{
   if(files.length===0) return;
   for(const file of files){
     const totalActual = docArchivos.reduce((sum,a)=>sum+a.data.length,0);
-    if(totalActual > 950000){
+    if(totalActual > 780000){
       toast('Ya alcanzaste el límite de tamaño para este documento');
       break;
     }
@@ -884,12 +889,22 @@ async function guardarDocumento(){
   if(docArchivos.length===0){ toast('Elegí al menos un archivo'); return; }
 
   const data = {titulo, fecha, archivos: docArchivos};
-  if(editingDocId){
-    await safeSetDoc(docsCol(activePetId).doc(editingDocId), data);
-    toast('Documento actualizado');
-  } else {
-    await docsCol(activePetId).add(data);
-    toast('Documento guardado');
+  try{
+    if(editingDocId){
+      await docsCol(activePetId).doc(editingDocId).set(data, {merge:true});
+      toast('Documento actualizado');
+    } else {
+      await docsCol(activePetId).add(data);
+      toast('Documento guardado');
+    }
+  }catch(err){
+    console.error(err);
+    if(err && err.code==='invalid-argument'){
+      toast('Los archivos son muy pesados en conjunto. Sacá alguno o subilos en documentos separados.');
+    } else {
+      toast('No se pudo guardar el documento (revisá tu conexión)');
+    }
+    return;
   }
   resetDocForm();
   renderDocumentos();
@@ -1046,9 +1061,14 @@ function consultasCol(petId){ return petsCol().doc(petId).collection('consultas'
 document.getElementById('btnAgregarVet').addEventListener('click', async ()=>{
   const txt = document.getElementById('vetTexto').value.trim();
   if(!txt){ toast('Escribí algo primero'); return; }
-  await consultasCol(activePetId).add({texto:txt, resuelto:false, ts:Date.now()});
-  document.getElementById('vetTexto').value = '';
-  renderVet();
+  try{
+    await consultasCol(activePetId).add({texto:txt, resuelto:false, ts:Date.now()});
+    document.getElementById('vetTexto').value = '';
+    renderVet();
+  }catch(err){
+    console.error(err);
+    toast('No se pudo guardar (revisá tu conexión)');
+  }
 });
 async function toggleConsulta(id, val){
   await safeSetDoc(consultasCol(activePetId).doc(id), {resuelto:val});
