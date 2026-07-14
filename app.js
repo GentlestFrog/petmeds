@@ -84,6 +84,10 @@ let diasVariable = [];
 let horariosForm = [];
 let recDosisModo = 'fija';
 let vecesRecurrente = [];
+let recUnidadIntervalo = 'dias';
+let recFinModo = 'nunca';
+let medsSubView = 'meds';
+let editingVacunaId = null;
 let editingDocId = null;
 let prefs = {fecha:'dmy', hora:'24h'};
 let weekStart = null;
@@ -140,6 +144,11 @@ auth.onAuthStateChanged(async (user)=>{
     await bootstrapApp();
   } else {
     document.getElementById('joinCreateCard').style.display = 'block';
+    const params = new URLSearchParams(location.search);
+    const codeFromLink = params.get('household');
+    if(codeFromLink){
+      document.getElementById('inputJoinCode').value = codeFromLink;
+    }
   }
 });
 
@@ -154,6 +163,7 @@ async function bootstrapApp(){
   await loadActivePet();
   await loadMeds();
   resetMedForm();
+  resetVacunaForm();
   await render();
 }
 
@@ -219,19 +229,49 @@ function fechaFinMed(med){
   if(med.tipo==='variable') return addDays(med.fechaInicio, (med.dosisPorDia||[]).length-1);
   return null;
 }
+function addMonths(dateStr, n){
+  const d = parseDate(dateStr);
+  const firstOfTarget = new Date(d.getFullYear(), d.getMonth()+n, 1);
+  const lastDay = new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth()+1, 0).getDate();
+  const day = Math.min(d.getDate(), lastDay);
+  return toStr(new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth(), day));
+}
+function getIntervaloNum(med){ return med.intervalo!=null ? med.intervalo : (med.intervaloDias||1); }
+function getUnidadIntervalo(med){ return med.unidadIntervalo || 'dias'; }
+function fechaDeOcurrencia(med, k){
+  const n = getIntervaloNum(med);
+  return getUnidadIntervalo(med)==='meses' ? addMonths(med.fechaInicio, k*n) : addDays(med.fechaInicio, k*n);
+}
+function ocurrenciaDentroDeLimite(med, k){
+  if(med.finModo==='veces') return k < (med.finVeces||1);
+  if(med.finModo==='fecha' && med.finFecha) return fechaDeOcurrencia(med,k) <= med.finFecha;
+  return true;
+}
+function ocurrenciaIndice(med, dateStr){
+  if(dateStr < med.fechaInicio) return null;
+  const n = getIntervaloNum(med);
+  if(getUnidadIntervalo(med)==='meses'){
+    const d0=parseDate(med.fechaInicio), d1=parseDate(dateStr);
+    const totalMeses = (d1.getFullYear()-d0.getFullYear())*12 + (d1.getMonth()-d0.getMonth());
+    if(totalMeses % n !== 0 || totalMeses<0) return null;
+    const k = totalMeses/n;
+    return addMonths(med.fechaInicio, k*n)===dateStr ? k : null;
+  }
+  const diff = diffDays(med.fechaInicio, dateStr);
+  return (diff % n === 0) ? diff/n : null;
+}
 function dosisEnFecha(med, dateStr){
   const diff = diffDays(med.fechaInicio, dateStr);
   if(diff<0) return null;
   if(med.tipo==='fijo'){ return diff <= (med.duracionDias||1)-1 ? med.dosisFija : null; }
   if(med.tipo==='variable'){ const arr=med.dosisPorDia||[]; return diff<arr.length ? arr[diff].dosis : null; }
   if(med.tipo==='recurrente'){
-    const it = med.intervaloDias||1;
-    if(diff % it !== 0) return null;
+    const k = ocurrenciaIndice(med, dateStr);
+    if(k===null || !ocurrenciaDentroDeLimite(med,k)) return null;
     if(med.dosisModo==='variable'){
-      const ocurrencia = Math.floor(diff/it)+1;
       const arr = med.dosisPorCiclo||[];
       if(arr.length===0) return null;
-      const idx = Math.min(ocurrencia-1, arr.length-1);
+      const idx = Math.min(k, arr.length-1);
       return arr[idx].dosis;
     }
     return med.dosisRec;
@@ -240,10 +280,9 @@ function dosisEnFecha(med, dateStr){
 }
 function vezDeRecurrente(med, dateStr){
   if(med.tipo!=='recurrente') return null;
-  const it = med.intervaloDias||1;
-  const diff = diffDays(med.fechaInicio, dateStr);
-  if(diff<0 || diff % it !== 0) return null;
-  return Math.floor(diff/it)+1;
+  const k = ocurrenciaIndice(med, dateStr);
+  if(k===null || !ocurrenciaDentroDeLimite(med,k)) return null;
+  return k+1;
 }
 function horariosDe(med){
   return (med.horarios && med.horarios.length>0) ? med.horarios.slice().sort() : ['_default'];
@@ -262,11 +301,25 @@ function diaXdeY(med, dateStr){
   return null;
 }
 function proximaTomaRecurrente(med, fromStr){
-  const it = med.intervaloDias||1;
-  let diff = diffDays(med.fechaInicio, fromStr);
-  let resto = ((diff % it)+it)%it;
-  let dh = resto===0 ? 0 : (it-resto);
-  return addDays(fromStr, dh);
+  const n = getIntervaloNum(med);
+  if(fromStr <= med.fechaInicio){
+    return ocurrenciaDentroDeLimite(med,0) ? med.fechaInicio : null;
+  }
+  if(getUnidadIntervalo(med)==='meses'){
+    const d0=parseDate(med.fechaInicio), d1=parseDate(fromStr);
+    const totalMeses = (d1.getFullYear()-d0.getFullYear())*12 + (d1.getMonth()-d0.getMonth());
+    const kBase = Math.floor(totalMeses/n);
+    for(let k=Math.max(0,kBase-1); k<kBase+3; k++){
+      const f = addMonths(med.fechaInicio, k*n);
+      if(f >= fromStr) return ocurrenciaDentroDeLimite(med,k) ? f : null;
+    }
+    return null;
+  }
+  const diff = diffDays(med.fechaInicio, fromStr);
+  const resto = diff % n;
+  const diasHasta = resto===0 ? 0 : (n-resto);
+  const k = (diff+diasHasta)/n;
+  return ocurrenciaDentroDeLimite(med,k) ? addDays(fromStr, diasHasta) : null;
 }
 
 async function loadMeds(){
@@ -341,13 +394,9 @@ async function renderPastillero(){
   const meses=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   const dMes = parseDate(weekStart);
   document.getElementById('mesBtnTexto').textContent = capitalizar(meses[dMes.getMonth()])+' '+dMes.getFullYear();
+  document.getElementById('pastilleroJump').value = selectedDate;
 }
 
-document.getElementById('mesBtn').addEventListener('click', ()=>{
-  const inp = document.getElementById('pastilleroJump');
-  inp.value = selectedDate;
-  try{ inp.showPicker(); }catch(e){ inp.click(); }
-});
 document.getElementById('pastilleroJump').addEventListener('change', (e)=>{
   if(!e.target.value) return;
   selectedDate = e.target.value;
@@ -455,6 +504,8 @@ function resetMedForm(){
   horariosForm = [];
   recDosisModo = 'fija';
   vecesRecurrente = [{dosis:''}];
+  recUnidadIntervalo = 'dias';
+  recFinModo = 'nunca';
   document.getElementById('medFormTitle').textContent='Agregar medicación';
   document.getElementById('medNombre').value='';
   document.getElementById('medForma').value='';
@@ -464,13 +515,24 @@ function resetMedForm(){
   document.getElementById('medFechaFinFijo').value='';
   document.getElementById('medDosisRec').value='';
   document.getElementById('medIntervalo').value='';
+  document.getElementById('medUnidadIntervalo').value='dias';
+  document.getElementById('medFinVeces').value='';
+  document.getElementById('medFinFecha').value='';
   document.getElementById('medNotas').value='';
   document.getElementById('btnCancelarEdicionMed').style.display='none';
   setMedTipo('fijo');
   setRecDosisModo('fija');
+  setRecFinModo('nunca');
   renderDiasVariable();
   renderHorariosForm();
   renderVecesRecurrente();
+  actualizarCalculos();
+}
+function setRecFinModo(modo){
+  recFinModo = modo;
+  document.querySelectorAll('#recFinModoSeg button').forEach(b=>b.classList.toggle('active', b.dataset.modo===modo));
+  document.getElementById('recFinVecesWrap').style.display = modo==='veces' ? '' : 'none';
+  document.getElementById('recFinFechaWrap').style.display = modo==='fecha' ? '' : 'none';
   actualizarCalculos();
 }
 function setRecDosisModo(modo){
@@ -565,16 +627,32 @@ function actualizarCalculos(origen){
   } else if(medTipoActual==='recurrente'){
     const it = +document.getElementById('medIntervalo').value || 0;
     const el = document.getElementById('medProximaCalc');
+    document.getElementById('medMensualInfo').style.display = recUnidadIntervalo==='meses' ? '' : 'none';
+    if(recUnidadIntervalo==='meses'){
+      document.getElementById('medMensualInfo').textContent = 'Se repetirá el día '+parseDate(inicio).getDate()+' de cada '+(it>1?it+' meses':'mes')+' (según la fecha de inicio).';
+    }
     if(it>0){
-      const prox = proximaTomaRecurrente({fechaInicio:inicio, intervaloDias:it}, todayStr());
+      const medTmp = {
+        fechaInicio: inicio, intervalo: it, unidadIntervalo: recUnidadIntervalo,
+        finModo: recFinModo,
+        finVeces: +document.getElementById('medFinVeces').value || 1,
+        finFecha: document.getElementById('medFinFecha').value || null
+      };
+      const prox = proximaTomaRecurrente(medTmp, todayStr());
       let dosisTxt = '';
-      if(recDosisModo==='variable' && vecesRecurrente.length){
-        const diff = diffDays(inicio, prox);
-        const ocurrencia = Math.floor(diff/it)+1;
-        const idx = Math.min(ocurrencia-1, vecesRecurrente.length-1);
-        if(vecesRecurrente[idx] && vecesRecurrente[idx].dosis) dosisTxt = ' · '+vecesRecurrente[idx].dosis+' (vez '+ocurrencia+')';
+      if(prox && recDosisModo==='variable' && vecesRecurrente.length){
+        const k = ocurrenciaIndice(medTmp, prox);
+        if(k!==null){
+          const idx = Math.min(k, vecesRecurrente.length-1);
+          if(vecesRecurrente[idx] && vecesRecurrente[idx].dosis) dosisTxt = ' · '+vecesRecurrente[idx].dosis+' (vez '+(k+1)+')';
+        }
       }
-      el.textContent = 'Se repite cada '+it+' días. Próxima toma: '+fmtHuman(prox)+dosisTxt+'.';
+      const unidadTxt = recUnidadIntervalo==='meses' ? (it===1?'mes':'meses') : (it===1?'día':'días');
+      if(prox===null){
+        el.textContent = 'Con esta configuración, no quedarían tomas futuras.';
+      } else {
+        el.textContent = 'Se repite cada '+it+' '+unidadTxt+'. Próxima toma: '+fmtHuman(prox)+dosisTxt+'.';
+      }
     } else el.textContent='';
   }
 }
@@ -598,8 +676,20 @@ async function guardarMedForm(){
     med.dosisPorDia = diasVariable.map(d=>({dia:d.dia, dosis:d.dosis.trim()}));
   } else if(medTipoActual==='recurrente'){
     const it = +document.getElementById('medIntervalo').value;
-    if(!it || it<1){ toast('Indicá cada cuántos días se repite'); return; }
-    med.intervaloDias = it;
+    if(!it || it<1){ toast('Indicá cada cuánto se repite'); return; }
+    med.intervalo = it;
+    med.unidadIntervalo = recUnidadIntervalo;
+    med.finModo = recFinModo;
+    if(recFinModo==='veces'){
+      const nVeces = +document.getElementById('medFinVeces').value;
+      if(!nVeces || nVeces<1){ toast('Indicá cuántas veces se repite'); return; }
+      med.finVeces = nVeces;
+    } else if(recFinModo==='fecha'){
+      const finFecha = document.getElementById('medFinFecha').value;
+      if(!finFecha){ toast('Indicá hasta qué fecha se repite'); return; }
+      if(finFecha < fechaInicio){ toast('La fecha de fin no puede ser antes del inicio'); return; }
+      med.finFecha = finFecha;
+    }
     med.dosisModo = recDosisModo;
     if(recDosisModo==='fija'){
       const dosisRec = document.getElementById('medDosisRec').value.trim();
@@ -637,7 +727,13 @@ function editarMed(id){
     diasVariable = (med.dosisPorDia||[{dia:1,dosis:''}]).map(d=>({dia:d.dia, dosis:d.dosis}));
     renderDiasVariable();
   } else if(med.tipo==='recurrente'){
-    document.getElementById('medIntervalo').value=med.intervaloDias||'';
+    document.getElementById('medIntervalo').value=getIntervaloNum(med);
+    recUnidadIntervalo = getUnidadIntervalo(med);
+    document.getElementById('medUnidadIntervalo').value = recUnidadIntervalo;
+    recFinModo = med.finModo || 'nunca';
+    document.getElementById('medFinVeces').value = med.finVeces || '';
+    document.getElementById('medFinFecha').value = med.finFecha || '';
+    setRecFinModo(recFinModo);
     recDosisModo = med.dosisModo || 'fija';
     if(recDosisModo==='fija'){
       document.getElementById('medDosisRec').value=med.dosisRec||'';
@@ -668,9 +764,42 @@ async function eliminarMed(id){
 let inactivasAbiertas = false;
 
 function estaFinalizada(med, hoy){
-  if(med.tipo==='recurrente') return false;
+  if(med.tipo==='recurrente'){
+    if(!med.finModo || med.finModo==='nunca') return false;
+    return proximaTomaRecurrente(med, hoy) === null;
+  }
   const fin = fechaFinMed(med);
   return !!(fin && hoy > fin);
+}
+
+function medRRule(med){
+  if(med.tipo==='recurrente'){
+    let rule = getUnidadIntervalo(med)==='meses' ? ('FREQ=MONTHLY;INTERVAL='+getIntervaloNum(med)) : ('FREQ=DAILY;INTERVAL='+getIntervaloNum(med));
+    if(med.finModo==='veces' && med.finVeces) rule += ';COUNT='+med.finVeces;
+    else if(med.finModo==='fecha' && med.finFecha) rule += ';UNTIL='+med.finFecha.replace(/-/g,'')+'T235959Z';
+    return rule;
+  }
+  const fin = fechaFinMed(med) || med.fechaInicio;
+  return 'FREQ=DAILY;UNTIL='+fin.replace(/-/g,'')+'T235959Z';
+}
+function medCalendarUrls(med){
+  const hora = (med.horarios && med.horarios[0]) ? med.horarios[0] : '09:00';
+  const startStr = buildDateTimeStr(med.fechaInicio, hora);
+  const [hh,mm] = hora.split(':').map(Number);
+  let endH=hh, endM=mm+15;
+  if(endM>=60){ endM-=60; endH+=1; if(endH>=24) endH-=24; }
+  const endStr = buildDateTimeStr(med.fechaInicio, pad(endH)+':'+pad(endM));
+  const dosisTxt = med.tipo==='fijo' ? (med.dosisFija||'') : (med.tipo==='recurrente' ? (med.dosisRec||'según corresponda') : 'según el día');
+  const detalleTxt = (med.formaIngesta||'')+' '+dosisTxt+(med.notas?' · '+med.notas:'');
+  const rrule = medRRule(med);
+  const gcalUrl = 'https://calendar.google.com/calendar/render?action=TEMPLATE&text='+encodeURIComponent('Medicación: '+med.nombre)+
+    '&dates='+startStr+'/'+endStr+'&recur='+encodeURIComponent('RRULE:'+rrule)+'&details='+encodeURIComponent(detalleTxt);
+  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//DiarioDeSalud//ES','BEGIN:VEVENT','UID:med-'+med.id+'@local',
+    'DTSTAMP:'+nowUTCStr(),'DTSTART:'+startStr,'DTEND:'+endStr,'RRULE:'+rrule,'SUMMARY:Medicación: '+med.nombre,
+    'DESCRIPTION:'+detalleTxt.replace(/[\r\n,]/g,' '),'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+  const icsUrl = 'data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
+  return {gcalUrl, icsUrl};
 }
 
 function medCardHtml(med, hoy){
@@ -678,8 +807,15 @@ function medCardHtml(med, hoy){
   const finalizada = estaFinalizada(med, hoy);
   if(med.tipo==='recurrente'){
     const prox = proximaTomaRecurrente(med, hoy);
-    infoFin = 'Próxima toma: <b>'+fmtHuman(prox)+'</b> · se repite cada '+med.intervaloDias+' días';
-    if(med.dosisModo==='variable') infoFin += ' · dosis varía según la vez';
+    const unidadTxt = getUnidadIntervalo(med)==='meses' ? (getIntervaloNum(med)===1?'mes':'meses') : (getIntervaloNum(med)===1?'día':'días');
+    if(prox===null){
+      infoFin = 'Completó todas las tomas programadas.';
+    } else {
+      infoFin = 'Próxima toma: <b>'+fmtHuman(prox)+'</b> · se repite cada '+getIntervaloNum(med)+' '+unidadTxt;
+      if(med.dosisModo==='variable') infoFin += ' · dosis varía según la vez';
+    }
+    if(med.finModo==='veces') infoFin += ' · hasta '+med.finVeces+' veces';
+    else if(med.finModo==='fecha') infoFin += ' · hasta el '+fmtHuman(med.finFecha);
   } else {
     const fin = fechaFinMed(med);
     const diasRest = diffDays(hoy, fin);
@@ -689,16 +825,21 @@ function medCardHtml(med, hoy){
   }
   const tipoLabel = med.tipo==='fijo'?'Fija':med.tipo==='variable'?'Variable':'Recurrente';
   const badgeEstado = med.activo===false ? '<span class="badge inactivo">Inactiva</span>' : (finalizada ? '<span class="badge finalizada">Finalizada</span>' : '');
+  const cal = medCalendarUrls(med);
   return '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><div><h3>'+escapeHtml(med.nombre)+'</h3>'+
     '<span class="badge '+med.tipo+'">'+tipoLabel+'</span> '+badgeEstado+'</div></div>'+
     '<p class="muted" style="margin:8px 0 2px;">Desde el '+fmtHuman(med.fechaInicio)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+'</p>'+
     '<p class="muted" style="margin:2px 0 10px;">'+infoFin+'</p>'+
     (med.horarios && med.horarios.length ? '<p class="muted" style="margin:0 0 10px;">🕒 Horarios: '+med.horarios.slice().sort().map(fmtHora).join(', ')+'</p>' : '')+
     (med.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(med.notas)+'</p>' : '')+
-    '<div style="display:flex; gap:14px;">'+
+    '<div style="display:flex; gap:14px; flex-wrap:wrap;">'+
     '<button class="ghost-small" data-edit="'+med.id+'" style="color:var(--pine);">Editar</button>'+
     '<button class="ghost-small" data-toggle="'+med.id+'" style="color:var(--ink-soft);">'+(med.activo===false?'Reactivar':'Marcar inactiva')+'</button>'+
-    '<button class="ghost-small" data-del="'+med.id+'">Eliminar</button></div>';
+    '<button class="ghost-small" data-del="'+med.id+'">Eliminar</button></div>'+
+    '<div style="display:flex; gap:14px; margin-top:6px;">'+
+    '<a href="'+cal.gcalUrl+'" target="_blank" rel="noopener" class="ghost-small" style="color:var(--pine); text-decoration:none;">🗓️ Google Calendar</a>'+
+    '<a href="'+cal.icsUrl+'" download="recordatorio-'+med.id+'.ics" class="ghost-small" style="text-decoration:none;">⬇️ .ics</a>'+
+    '</div>';
 }
 
 function wireMedCardButtons(container){
@@ -752,6 +893,112 @@ document.getElementById('btnToggleInactivas').addEventListener('click', ()=>{
   inactivasAbiertas = !inactivasAbiertas;
   renderMedsList();
 });
+
+/* ==================== toggle Medicación / Vacunas ==================== */
+document.querySelectorAll('#medsVacunasSeg button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    medsSubView = b.dataset.sub;
+    document.querySelectorAll('#medsVacunasSeg button').forEach(x=>x.classList.toggle('active', x===b));
+    document.getElementById('subMeds').style.display = medsSubView==='meds' ? '' : 'none';
+    document.getElementById('subVacunas').style.display = medsSubView==='vacunas' ? '' : 'none';
+    document.getElementById('medsVacunasTitulo').textContent = medsSubView==='meds' ? 'Medicación' : 'Vacunas';
+    if(medsSubView==='vacunas') renderVacunas(); else renderMedsList();
+  });
+});
+
+/* ==================== vacunas ==================== */
+function vacunasCol(petId){ return petsCol().doc(petId).collection('vacunas'); }
+
+function resetVacunaForm(){
+  editingVacunaId = null;
+  document.getElementById('vacunaFormTitle').textContent = 'Agregar vacuna';
+  document.getElementById('vacNombre').value = '';
+  document.getElementById('vacFechaAplicada').value = todayStr();
+  document.getElementById('vacFechaProxima').value = '';
+  document.getElementById('vacNotas').value = '';
+  document.getElementById('btnCancelarEdicionVacuna').style.display = 'none';
+}
+
+async function guardarVacuna(){
+  const nombre = document.getElementById('vacNombre').value.trim();
+  const fechaAplicada = document.getElementById('vacFechaAplicada').value || todayStr();
+  const fechaProxima = document.getElementById('vacFechaProxima').value || '';
+  const notas = document.getElementById('vacNotas').value.trim();
+  if(!nombre){ toast('Poné el nombre de la vacuna'); return; }
+  const data = {nombre, fechaAplicada, fechaProxima, notas};
+  try{
+    if(editingVacunaId){
+      await vacunasCol(activePetId).doc(editingVacunaId).set(data, {merge:true});
+      toast('Vacuna actualizada');
+    } else {
+      await vacunasCol(activePetId).add(data);
+      toast('Vacuna guardada');
+    }
+  }catch(err){
+    console.error(err);
+    toast('No se pudo guardar (revisá tu conexión)');
+    return;
+  }
+  resetVacunaForm();
+  renderVacunas();
+}
+
+function editarVacuna(v){
+  editingVacunaId = v.id;
+  document.getElementById('vacunaFormTitle').textContent = 'Editar vacuna';
+  document.getElementById('vacNombre').value = v.nombre;
+  document.getElementById('vacFechaAplicada').value = v.fechaAplicada;
+  document.getElementById('vacFechaProxima').value = v.fechaProxima || '';
+  document.getElementById('vacNotas').value = v.notas || '';
+  document.getElementById('btnCancelarEdicionVacuna').style.display = '';
+  document.getElementById('vacunaFormTitle').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+async function eliminarVacuna(id){
+  if(!confirm('¿Eliminar esta vacuna?')) return;
+  await safeDeleteDoc(vacunasCol(activePetId).doc(id));
+  renderVacunas();
+  toast('Vacuna eliminada');
+}
+
+async function renderVacunas(){
+  const wrap = document.getElementById('vacunasListWrap');
+  if(!activePetId){ wrap.innerHTML=''; return; }
+  wrap.innerHTML = '<p class="muted">Cargando...</p>';
+  const vacs = await safeListCol(vacunasCol(activePetId));
+  vacs.sort((a,b)=> (b.fechaAplicada||'').localeCompare(a.fechaAplicada||''));
+  if(vacs.length===0){
+    wrap.innerHTML = '<div class="empty-state"><span class="big">💉</span>Todavía no cargaste ninguna vacuna.</div>';
+    return;
+  }
+  const hoy = todayStr();
+  wrap.innerHTML = '';
+  vacs.forEach(v=>{
+    let estadoBadge = '';
+    if(v.fechaProxima){
+      if(v.fechaProxima < hoy) estadoBadge = '<span class="badge" style="background:var(--rust); color:var(--white);">Refuerzo vencido</span>';
+      else if(diffDays(hoy, v.fechaProxima) <= 30) estadoBadge = '<span class="badge fijo">Refuerzo próximo</span>';
+    }
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML =
+      '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><h3>'+escapeHtml(v.nombre)+'</h3>'+estadoBadge+'</div>'+
+      '<p class="muted" style="margin:8px 0 2px;">Aplicada el '+fmtHuman(v.fechaAplicada)+'</p>'+
+      (v.fechaProxima ? '<p class="muted" style="margin:2px 0 10px;">Próximo refuerzo: <b>'+fmtHuman(v.fechaProxima)+'</b></p>' : '')+
+      (v.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(v.notas)+'</p>' : '')+
+      '<div style="display:flex; gap:14px;">'+
+      '<button class="ghost-small" data-edit="'+v.id+'" style="color:var(--pine);">Editar</button>'+
+      '<button class="ghost-small" data-del="'+v.id+'">Eliminar</button></div>';
+    wrap.appendChild(card);
+  });
+  wrap.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=>{
+    const v = vacs.find(x=>x.id===b.dataset.edit);
+    if(v) editarVacuna(v);
+  }));
+  wrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', ()=>eliminarVacuna(b.dataset.del)));
+}
+document.getElementById('btnGuardarVacuna').addEventListener('click', guardarVacuna);
+document.getElementById('btnCancelarEdicionVacuna').addEventListener('click', resetVacunaForm);
 
 /* ==================== vista Historial ==================== */
 async function renderHistorial(){
@@ -1036,6 +1283,8 @@ async function renderCompartir(){
   const h = await safeGetDoc(householdRef());
   if(!h) return;
   document.getElementById('householdIdText').textContent = householdId;
+  const shareUrl = location.origin + location.pathname + '?household=' + encodeURIComponent(householdId);
+  document.getElementById('shareLinkText').textContent = shareUrl;
   document.getElementById('ownerOnlyShare').style.display = isOwner ? '' : 'none';
   document.getElementById('ownerInfo').textContent = isOwner
     ? 'Sos el dueño de este hogar. Podés autorizar otros emails de Google para que vean y editen esta misma información.'
@@ -1057,6 +1306,10 @@ async function renderCompartir(){
 }
 document.getElementById('btnCopyId').addEventListener('click', ()=>{
   navigator.clipboard.writeText(householdId).then(()=>toast('Código copiado')).catch(()=>toast('No se pudo copiar'));
+});
+document.getElementById('btnCopyLink').addEventListener('click', ()=>{
+  const link = document.getElementById('shareLinkText').textContent;
+  navigator.clipboard.writeText(link).then(()=>toast('Link copiado')).catch(()=>toast('No se pudo copiar'));
 });
 document.getElementById('btnAgregarEmail').addEventListener('click', async ()=>{
   const input = document.getElementById('inputNuevoEmail');
@@ -1193,18 +1446,41 @@ async function render(){
   await renderPastillero();
   const activeView = document.querySelector('.view.active').id;
   if(activeView==='view-hoy') await renderHoy();
-  if(activeView==='view-meds') renderMedsList();
+  if(activeView==='view-meds'){ if(medsSubView==='vacunas') await renderVacunas(); else renderMedsList(); }
   if(activeView==='view-historial') await renderHistorial();
   if(activeView==='view-documentos') await renderDocumentos();
   if(activeView==='view-vet') await renderVet();
   if(activeView==='view-ajustes') await renderAjustes();
-  const totalMeds = meds.filter(m=>m.activo!==false).length;
-  document.getElementById('topSub').textContent = totalMeds>0 ? totalMeds+' medicación'+(totalMeds===1?'':'es')+' activa'+(totalMeds===1?'':'s') : 'Sin medicación activa';
+
+  const hoy = todayStr();
+  const activos = meds.filter(m=>m.activo!==false && !estaFinalizada(m, hoy));
+  const tomandoHoy = activos.filter(m=>dosisEnFecha(m, hoy)!==null).length;
+  const proximas7 = activos.filter(m=>{
+    if(dosisEnFecha(m, hoy)!==null) return false;
+    let inicioProx = null;
+    if(m.tipo==='recurrente'){
+      inicioProx = proximaTomaRecurrente(m, addDays(hoy,1));
+    } else if(m.fechaInicio > hoy){
+      inicioProx = m.fechaInicio;
+    }
+    if(!inicioProx) return false;
+    const dias = diffDays(hoy, inicioProx);
+    return dias>=1 && dias<=7;
+  }).length;
+  let subTxt = tomandoHoy>0
+    ? 'Tomando '+tomandoHoy+' medicación'+(tomandoHoy===1?'':'es')
+    : 'No está tomando medicación hoy';
+  if(proximas7>0) subTxt += '. '+proximas7+' medicación'+(proximas7===1?'':'es')+' se agregará'+(proximas7===1?'':'n')+' en 7 días o menos.';
+  document.getElementById('topSub').textContent = subTxt;
 }
 
 /* ==================== eventos formulario medicación ==================== */
 document.querySelectorAll('#medTipoSeg button').forEach(b=>b.addEventListener('click', ()=>setMedTipo(b.dataset.tipo)));
 document.querySelectorAll('#recDosisModoSeg button').forEach(b=>b.addEventListener('click', ()=>setRecDosisModo(b.dataset.modo)));
+document.querySelectorAll('#recFinModoSeg button').forEach(b=>b.addEventListener('click', ()=>setRecFinModo(b.dataset.modo)));
+document.getElementById('medUnidadIntervalo').addEventListener('change', (e)=>{ recUnidadIntervalo = e.target.value; actualizarCalculos(); });
+document.getElementById('medFinVeces').addEventListener('input', ()=>actualizarCalculos());
+document.getElementById('medFinFecha').addEventListener('input', ()=>actualizarCalculos());
 document.getElementById('medFechaInicio').addEventListener('change', ()=>actualizarCalculos());
 document.getElementById('medDuracion').addEventListener('input', ()=>actualizarCalculos('dur'));
 document.getElementById('medFechaFinFijo').addEventListener('input', ()=>actualizarCalculos('fin'));

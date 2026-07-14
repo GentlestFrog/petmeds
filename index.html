@@ -67,9 +67,10 @@
   .pet-picker option{color:var(--ink);}
 
   /* ---------- pastillero ---------- */
-  .mes-btn{background:none; border:none; color:var(--white); font-family:'Fraunces', serif; font-size:15px; font-weight:600; cursor:pointer; padding:0; margin-top:16px; display:flex; align-items:center; gap:5px;}
+  .mes-row{position:relative; display:inline-block; margin-top:16px;}
+  .mes-btn{background:none; border:none; color:var(--white); font-family:'Fraunces', serif; font-size:15px; font-weight:600; cursor:pointer; padding:0; display:flex; align-items:center; gap:5px; pointer-events:none;}
   .mes-btn .mes-caret{font-size:10px; opacity:.75;}
-  .jump-hidden{position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;}
+  .jump-overlay{position:absolute; inset:0; width:100%; height:100%; opacity:0; border:none; padding:0; margin:0; cursor:pointer;}
   .pastillero{display:flex; gap:7px; margin-top:8px; padding:10px; background:var(--pine-2); border-radius:14px; touch-action:pan-y;}
   .pill-day{flex:1; display:flex; flex-direction:column; align-items:center; gap:5px; padding:8px 2px 9px; border-radius:11px; cursor:pointer; border:1.5px solid transparent; background:transparent; color:var(--sage-light); font-family:'IBM Plex Mono', monospace; transition:transform .15s ease;}
   .pill-day:hover{transform:translateY(-1px);}
@@ -249,8 +250,10 @@
       <p class="sub" id="topSub"></p>
       <select class="pet-picker" id="petPicker" style="display:none;"></select>
       <div id="semanaWrap">
-        <button type="button" id="mesBtn" class="mes-btn"><span id="mesBtnTexto">—</span><span class="mes-caret">▾</span></button>
-        <input type="date" id="pastilleroJump" class="jump-hidden">
+        <div class="mes-row">
+          <button type="button" id="mesBtn" class="mes-btn"><span id="mesBtnTexto">—</span><span class="mes-caret">▾</span></button>
+          <input type="date" id="pastilleroJump" class="jump-overlay">
+        </div>
         <div class="pastillero" id="pastillero"></div>
       </div>
     </div>
@@ -291,7 +294,13 @@
 
       <!-- MEDICACION -->
       <div class="view" id="view-meds">
-        <h2 class="section-title">Medicación</h2>
+        <h2 class="section-title" id="medsVacunasTitulo">Medicación</h2>
+        <div class="segmented" id="medsVacunasSeg" style="margin-bottom:14px;">
+          <button data-sub="meds" class="active">Medicación</button>
+          <button data-sub="vacunas">Vacunas</button>
+        </div>
+
+        <div id="subMeds">
         <div id="medsListWrap"></div>
         <div class="card">
           <h3 id="medFormTitle">Agregar medicación</h3>
@@ -337,8 +346,30 @@
               <div id="medVecesRecurrente"></div>
               <button class="secondary" id="btnAgregarVezRec" type="button">+ Agregar otra vez</button>
             </div>
-            <label>Se repite cada (días)</label>
-            <input type="number" id="medIntervalo" min="1" placeholder="Ej: 30">
+            <label>Se repite cada</label>
+            <div class="row">
+              <input type="number" id="medIntervalo" min="1" placeholder="Ej: 30">
+              <select id="medUnidadIntervalo">
+                <option value="dias">día(s)</option>
+                <option value="meses">mes(es)</option>
+              </select>
+            </div>
+            <p class="muted" id="medMensualInfo" style="display:none;"></p>
+
+            <label>¿Hasta cuándo se repite?</label>
+            <div class="segmented" id="recFinModoSeg">
+              <button data-modo="nunca" class="active">Sin fin</button>
+              <button data-modo="veces">N veces</button>
+              <button data-modo="fecha">Hasta fecha</button>
+            </div>
+            <div id="recFinVecesWrap" style="display:none;">
+              <label>Cantidad de veces</label>
+              <input type="number" id="medFinVeces" min="1" placeholder="Ej: 6">
+            </div>
+            <div id="recFinFechaWrap" style="display:none;">
+              <label>Última fecha</label>
+              <input type="date" id="medFinFecha">
+            </div>
             <p class="muted" id="medProximaCalc"></p>
           </div>
 
@@ -361,6 +392,24 @@
             <span class="mes-caret" id="inactivasCaret">▾</span>
           </button>
           <div id="medsInactivasList" style="display:none;"></div>
+        </div>
+        </div>
+
+        <div id="subVacunas" style="display:none;">
+          <div id="vacunasListWrap"></div>
+          <div class="card">
+            <h3 id="vacunaFormTitle">Agregar vacuna</h3>
+            <label>Nombre</label>
+            <input type="text" id="vacNombre" placeholder="Ej: Antirrábica, Óctuple...">
+            <label>Fecha aplicada</label>
+            <input type="date" id="vacFechaAplicada">
+            <label>Próximo refuerzo (opcional)</label>
+            <input type="date" id="vacFechaProxima">
+            <label>Notas (opcional)</label>
+            <textarea id="vacNotas" placeholder="Lote, veterinaria, observaciones..."></textarea>
+            <button class="primary" id="btnGuardarVacuna">Guardar vacuna</button>
+            <button class="secondary" id="btnCancelarEdicionVacuna" style="display:none;">Cancelar edición</button>
+          </div>
         </div>
       </div>
 
@@ -420,7 +469,9 @@
           <h3>Compartir con otro cuidador</h3>
           <p class="muted" id="ownerInfo"></p>
           <div id="ownerOnlyShare" style="display:none;">
-            <label>Código de tu hogar (compartíselo a la otra persona)</label>
+            <label>Link directo para el otro cuidador (después de autorizar su email)</label>
+            <div class="id-box"><span id="shareLinkText" class="mono"></span><button class="secondary" id="btnCopyLink">Copiar link</button></div>
+            <label>Código de tu hogar</label>
             <div class="id-box"><span id="householdIdText" class="mono"></span><button class="secondary" id="btnCopyId">Copiar</button></div>
             <label>Agregar el email de Google de esa persona</label>
             <input type="email" id="inputNuevoEmail" placeholder="nombre@gmail.com">
@@ -463,7 +514,7 @@
 
     <div class="tabs">
       <button class="tab-btn active" data-view="hoy"><span class="ic">🐾</span>Hoy</button>
-      <button class="tab-btn" data-view="meds"><span class="ic">💊</span>Medicación</button>
+      <button class="tab-btn" data-view="meds"><span class="ic">💊</span>Meds</button>
       <button class="tab-btn" data-view="historial"><span class="ic">📖</span>Historial</button>
       <button class="tab-btn" data-view="documentos"><span class="ic">📄</span>Docs</button>
       <button class="tab-btn" data-view="vet"><span class="ic">🩺</span>Vet</button>
