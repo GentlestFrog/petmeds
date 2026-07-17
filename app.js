@@ -1480,6 +1480,35 @@ async function eliminarConsulta(id){
   await safeDeleteDoc(consultasCol(activePetId).doc(id));
   renderVet();
 }
+function iniciarEdicionVet(row, it){
+  row.innerHTML =
+    '<input type="checkbox" disabled '+(it.resuelto?'checked':'')+'>'+
+    '<input type="text" class="vet-edit-input" value="'+escapeHtml(it.texto)+'">'+
+    '<button class="icon-btn" data-save="'+it.id+'" title="Guardar">✓</button>'+
+    '<button class="icon-btn" data-cancel="'+it.id+'" title="Cancelar">✕</button>';
+  const input = row.querySelector('.vet-edit-input');
+  input.focus();
+  input.select();
+  const guardar = ()=>guardarEdicionVet(it.id, input.value);
+  row.querySelector('[data-save]').addEventListener('click', guardar);
+  row.querySelector('[data-cancel]').addEventListener('click', renderVet);
+  input.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter'){ e.preventDefault(); guardar(); }
+    if(e.key==='Escape'){ e.preventDefault(); renderVet(); }
+  });
+}
+async function guardarEdicionVet(id, texto){
+  texto = texto.trim();
+  if(!texto){ toast('El texto no puede quedar vacío'); return; }
+  try{
+    await safeSetDoc(consultasCol(activePetId).doc(id), {texto});
+    toast('Actualizado');
+  }catch(err){
+    console.error(err);
+    toast('No se pudo guardar (revisá tu conexión)');
+  }
+  renderVet();
+}
 async function renderVet(){
   const wrap = document.getElementById('vetListWrap');
   if(!activePetId){ wrap.innerHTML=''; return; }
@@ -1496,11 +1525,18 @@ async function renderVet(){
     row.className = 'vet-item';
     row.innerHTML = '<input type="checkbox" data-id="'+it.id+'" '+(it.resuelto?'checked':'')+'>'+
       '<span style="'+(it.resuelto?'text-decoration:line-through; color:var(--ink-soft);':'')+'">'+escapeHtml(it.texto)+'</span>'+
-      '<button class="icon-btn" data-del="'+it.id+'">✕</button>';
+      '<button class="icon-btn" data-edit="'+it.id+'" title="Editar">✎</button>'+
+      '<button class="icon-btn" data-del="'+it.id+'" title="Eliminar">✕</button>';
     wrap.appendChild(row);
   });
   wrap.querySelectorAll('input[type=checkbox]').forEach(chk=>{
     chk.addEventListener('change', ()=>toggleConsulta(chk.dataset.id, chk.checked));
+  });
+  wrap.querySelectorAll('[data-edit]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const it = items.find(x=>x.id===b.dataset.edit);
+      if(it) iniciarEdicionVet(b.closest('.vet-item'), it);
+    });
   });
   wrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', ()=>eliminarConsulta(b.dataset.del)));
 }
