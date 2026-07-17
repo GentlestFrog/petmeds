@@ -174,6 +174,8 @@
   .doc-attach-pdf{position:relative; display:flex; align-items:center; gap:6px; background:var(--paper-2); border-radius:8px; padding:6px 22px 6px 10px; font-size:12px; max-width:150px;}
   .doc-attach-pdf .doc-attach-name{max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .doc-attach-remove{position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; background:var(--rust); color:var(--white); border:none; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+  #medFotoPreviewWrap{margin:8px 0 4px;}
+  .med-photo-thumb{width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid var(--line); flex:none; margin-right:10px;}
   .doc-attach-pdf .doc-attach-remove{top:2px; right:2px; width:16px; height:16px; font-size:9px;}
 
   .docs-toolbar{display:flex; justify-content:flex-end; margin-bottom:10px;}
@@ -327,6 +329,14 @@
           <input type="text" id="medNombre" placeholder="Ej: Meloxicam">
           <label>Forma de ingesta</label>
           <input type="text" id="medForma" placeholder="Ej: comprimido, jarabe, gotas, inyectable...">
+          <label>Foto de la medicación (opcional)</label>
+          <input type="file" id="medFoto" accept="image/*">
+          <div id="medFotoPreviewWrap" style="display:none;">
+            <div class="doc-attach-img">
+              <img id="medFotoPreviewImg" src="">
+              <button type="button" class="doc-attach-remove" id="btnQuitarMedFoto">✕</button>
+            </div>
+          </div>
           <label>Fecha de inicio</label>
           <input type="date" id="medFechaInicio">
 
