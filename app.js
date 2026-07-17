@@ -1118,6 +1118,114 @@ document.getElementById('docArchivo').addEventListener('change', async (e)=>{
   e.target.value = '';
 });
 
+/* ==================== compartir documentos con el vet ==================== */
+function nombreArchivoConExtension(a, idx){
+  let nombre = a.nombre || ('archivo-'+(idx+1));
+  if(a.tipo==='pdf' && !/\.pdf$/i.test(nombre)) nombre += '.pdf';
+  if(a.tipo==='image' && !/\.(jpe?g|png|webp)$/i.test(nombre)) nombre += '.jpg';
+  return nombre;
+}
+
+function dataUrlToFile(dataUrl, filename){
+  const partes = dataUrl.split(',');
+  const mimeMatch = partes[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  const bin = atob(partes[1]);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0; i<bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new File([arr], filename, {type: mime});
+}
+
+function archivosToFiles(archivos){
+  return archivos.map((a, idx)=> dataUrlToFile(a.data, nombreArchivoConExtension(a, idx)));
+}
+
+async function descargarArchivosFallback(archivos){
+  for(const [idx, a] of archivos.entries()){
+    const link = document.createElement('a');
+    link.href = a.data;
+    link.download = nombreArchivoConExtension(a, idx);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    await new Promise(r=>setTimeout(r, 250));
+  }
+  toast('Se descargaron los archivos. Adjuntalos desde ahí en WhatsApp o el mail.');
+}
+
+async function compartirArchivos(archivos, tituloTexto){
+  if(!archivos || archivos.length===0){ toast('No hay archivos para compartir'); return; }
+  let files;
+  try{
+    files = archivosToFiles(archivos);
+  }catch(err){
+    console.error(err);
+    toast('No se pudieron preparar los archivos para compartir');
+    return;
+  }
+  if(navigator.share && navigator.canShare && navigator.canShare({files})){
+    try{
+      await navigator.share({files, title: tituloTexto || 'Documento', text: tituloTexto || ''});
+    }catch(err){
+      if(err && err.name !== 'AbortError'){
+        console.error(err);
+        toast('No se pudo abrir el menú para compartir, se descargarán los archivos');
+        await descargarArchivosFallback(archivos);
+      }
+    }
+  } else {
+    await descargarArchivosFallback(archivos);
+  }
+}
+
+async function compartirDocumento(doc){
+  const archivos = doc.archivos || (doc.imagen ? [{tipo:'image', nombre:'imagen', data:doc.imagen}] : []);
+  await compartirArchivos(archivos, doc.titulo+' · '+fmtHuman(doc.fecha));
+}
+
+let modoSeleccionDocs = false;
+let docsSeleccionados = new Set();
+let docsCache = [];
+
+function actualizarDocsShareBar(){
+  const n = docsSeleccionados.size;
+  document.getElementById('docsShareCount').textContent = n===1 ? '1 seleccionado' : n+' seleccionados';
+  document.getElementById('btnCompartirSeleccionados').disabled = n===0;
+}
+
+function entrarModoSeleccionDocs(){
+  modoSeleccionDocs = true;
+  docsSeleccionados.clear();
+  document.getElementById('btnToggleSeleccionDocs').style.display = 'none';
+  document.getElementById('docsShareBar').style.display = 'flex';
+  actualizarDocsShareBar();
+  renderDocumentos();
+}
+
+function salirModoSeleccionDocs(){
+  modoSeleccionDocs = false;
+  docsSeleccionados.clear();
+  document.getElementById('btnToggleSeleccionDocs').style.display = '';
+  document.getElementById('docsShareBar').style.display = 'none';
+  renderDocumentos();
+}
+
+async function compartirDocsSeleccionados(){
+  const elegidos = docsCache.filter(d=>docsSeleccionados.has(d.id));
+  if(elegidos.length===0){ toast('Elegí al menos un documento'); return; }
+  let archivos = [];
+  elegidos.forEach(d=>{
+    const a = d.archivos || (d.imagen ? [{tipo:'image', nombre:'imagen', data:d.imagen}] : []);
+    archivos = archivos.concat(a);
+  });
+  const tituloTexto = elegidos.length===1 ? elegidos[0].titulo : elegidos.length+' documentos';
+  await compartirArchivos(archivos, tituloTexto);
+}
+
+document.getElementById('btnToggleSeleccionDocs').addEventListener('click', entrarModoSeleccionDocs);
+document.getElementById('btnCancelarSeleccionDocs').addEventListener('click', salirModoSeleccionDocs);
+document.getElementById('btnCompartirSeleccionados').addEventListener('click', compartirDocsSeleccionados);
+
 function resetDocForm(){
   editingDocId = null;
   docArchivos = [];
@@ -1176,7 +1284,9 @@ async function eliminarDocumento(id){
   toast('Documento eliminado');
 }
 
+let docViewerActual = null;
 function abrirDocumento(doc){
+  docViewerActual = doc;
   const archivos = doc.archivos || (doc.imagen ? [{tipo:'image', nombre:'imagen', data:doc.imagen}] : []);
   document.getElementById('docViewerTitulo').textContent = doc.titulo+' · '+fmtHuman(doc.fecha);
   const body = document.getElementById('docViewerBody');
@@ -1203,10 +1313,14 @@ function abrirDocumento(doc){
   window.scrollTo(0,0);
 }
 function cerrarDocViewer(){
+  docViewerActual = null;
   document.getElementById('docViewerOverlay').style.display = 'none';
   document.getElementById('docViewerBody').innerHTML = '';
 }
 document.getElementById('btnCerrarDocViewer').addEventListener('click', cerrarDocViewer);
+document.getElementById('btnCompartirDocViewer').addEventListener('click', ()=>{
+  if(docViewerActual) compartirDocumento(docViewerActual);
+});
 
 async function renderDocumentos(){
   const wrap = document.getElementById('docsListWrap');
@@ -1214,6 +1328,7 @@ async function renderDocumentos(){
   wrap.innerHTML = '<p class="muted">Cargando...</p>';
   const docs = await safeListCol(docsCol(activePetId));
   docs.sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+  docsCache = docs;
   if(docs.length===0){
     wrap.innerHTML = '<div class="empty-state"><span class="big">📄</span>Todavía no subiste ningún documento.</div>';
     return;
@@ -1226,12 +1341,17 @@ async function renderDocumentos(){
     const badge = archivos.length>1 ? '<span class="doc-thumb-badge">+'+(archivos.length-1)+'</span>' : '';
     const card = document.createElement('div');
     card.className = 'doc-card';
+    const checkboxHtml = modoSeleccionDocs
+      ? '<input type="checkbox" class="doc-select-check" data-select="'+doc.id+'" '+(docsSeleccionados.has(doc.id)?'checked':'')+'>'
+      : '';
     card.innerHTML =
+      checkboxHtml +
       '<div class="doc-thumb-wrap" data-open="'+doc.id+'">'+thumbHtml+badge+'</div>'+
       '<div class="doc-info">'+
         '<b>'+escapeHtml(doc.titulo)+'</b>'+
         '<p class="muted" style="margin:2px 0 8px;">'+fmtHuman(doc.fecha)+(archivos.length>1?' · '+archivos.length+' archivos':'')+'</p>'+
-        '<div style="display:flex; gap:14px;">'+
+        '<div style="display:flex; gap:14px; flex-wrap:wrap;">'+
+          '<button class="ghost-small" data-share="'+doc.id+'" style="color:var(--sage-light);">↗ Compartir</button>'+
           '<button class="ghost-small" data-edit="'+doc.id+'" style="color:var(--pine);">Editar</button>'+
           '<button class="ghost-small" data-del="'+doc.id+'">Eliminar</button>'+
         '</div>'+
@@ -1244,6 +1364,13 @@ async function renderDocumentos(){
       if(doc) abrirDocumento(doc);
     });
   });
+  wrap.querySelectorAll('[data-share]').forEach(b=>{
+    b.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const doc = docs.find(d=>d.id===b.dataset.share);
+      if(doc) compartirDocumento(doc);
+    });
+  });
   wrap.querySelectorAll('[data-edit]').forEach(b=>{
     b.addEventListener('click', ()=>{
       const doc = docs.find(d=>d.id===b.dataset.edit);
@@ -1252,6 +1379,14 @@ async function renderDocumentos(){
   });
   wrap.querySelectorAll('[data-del]').forEach(b=>{
     b.addEventListener('click', ()=>eliminarDocumento(b.dataset.del));
+  });
+  wrap.querySelectorAll('.doc-select-check').forEach(chk=>{
+    chk.addEventListener('click', e=>e.stopPropagation());
+    chk.addEventListener('change', ()=>{
+      if(chk.checked) docsSeleccionados.add(chk.dataset.select);
+      else docsSeleccionados.delete(chk.dataset.select);
+      actualizarDocsShareBar();
+    });
   });
 }
 document.getElementById('btnGuardarDoc').addEventListener('click', guardarDocumento);
@@ -1431,6 +1566,7 @@ function updateCalendarLinks(){
 
 /* ==================== navegación ==================== */
 function switchView(name){
+  if(name!=='documentos' && modoSeleccionDocs) salirModoSeleccionDocs();
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-'+name).classList.add('active');
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===name));

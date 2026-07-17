@@ -176,6 +176,18 @@
   .doc-attach-remove{position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; background:var(--rust); color:var(--white); border:none; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;}
   .doc-attach-pdf .doc-attach-remove{top:2px; right:2px; width:16px; height:16px; font-size:9px;}
 
+  .docs-toolbar{display:flex; justify-content:flex-end; margin-bottom:10px;}
+  #docsShareBar{
+    display:none; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    background:var(--pine-2); color:var(--white); border-radius:12px; padding:10px 14px; margin-bottom:12px;
+  }
+  #docsShareBar span{font-size:13px;}
+  #docsShareBar button{width:auto; margin:0; padding:8px 14px; border-radius:20px; font-size:12.5px;}
+  #docsShareBar button.secondary{border-color:rgba(255,255,255,0.6); color:var(--white);}
+  #docsShareBar button.primary{background:var(--white); color:var(--pine-2); font-weight:700;}
+  #docsShareBar button.primary:disabled{opacity:.5; cursor:default;}
+  .doc-select-check{width:20px; height:20px; accent-color:var(--pine); flex:none; align-self:center;}
+
   .vet-item{display:flex; gap:10px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px;}
   .vet-item input[type=checkbox]{width:20px; height:20px; accent-color:var(--pine); flex:none; margin-top:2px;}
   .vet-item span{flex:1; font-size:14px; line-height:1.4;}
@@ -440,6 +452,16 @@
           <button class="primary" id="btnGuardarDoc">Guardar documento</button>
           <button class="secondary" id="btnCancelarEdicionDoc" style="display:none;">Cancelar edición</button>
         </div>
+        <div class="docs-toolbar">
+          <button class="ghost-small" id="btnToggleSeleccionDocs" type="button">Seleccionar varios para compartir</button>
+        </div>
+        <div id="docsShareBar">
+          <span id="docsShareCount">0 seleccionados</span>
+          <div style="display:flex; gap:8px;">
+            <button class="secondary" id="btnCancelarSeleccionDocs" type="button">Cancelar</button>
+            <button class="primary" id="btnCompartirSeleccionados" type="button" disabled>Compartir</button>
+          </div>
+        </div>
         <div id="docsListWrap"></div>
       </div>
 
@@ -525,7 +547,10 @@
     <div id="docViewerOverlay">
       <div class="doc-viewer-bar">
         <span id="docViewerTitulo"></span>
-        <button type="button" id="btnCerrarDocViewer">✕ Cerrar</button>
+        <div style="display:flex; gap:8px; flex:none;">
+          <button type="button" id="btnCompartirDocViewer">↗ Compartir</button>
+          <button type="button" id="btnCerrarDocViewer">✕ Cerrar</button>
+        </div>
       </div>
       <div id="docViewerBody"></div>
     </div>
