@@ -229,6 +229,18 @@
   #docViewerBody img{width:100%; border-radius:10px; display:block; margin-bottom:14px;}
   #docViewerBody embed{width:100%; height:75vh; border:none; border-radius:10px; margin-bottom:10px; background:var(--white);}
   #docViewerBody .doc-viewer-pdf-link{display:block; color:var(--sage-light); font-size:13px; margin-bottom:14px;}
+
+  #imgLightboxOverlay{
+    display:none; position:fixed; inset:0; background:rgba(20,30,26,0.92); z-index:110;
+    align-items:center; justify-content:center; padding:24px;
+  }
+  #imgLightboxOverlay img{max-width:100%; max-height:100%; border-radius:10px; display:block;}
+  #btnCerrarLightbox{
+    position:fixed; top:calc(14px + env(safe-area-inset-top)); right:16px; z-index:111;
+    background:var(--white); color:var(--pine-2); border:none; border-radius:50%;
+    width:36px; height:36px; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .med-photo-thumb{cursor:pointer;}
 </style>
 </head>
 <body>
@@ -564,6 +576,11 @@
         </div>
       </div>
       <div id="docViewerBody"></div>
+    </div>
+
+    <div id="imgLightboxOverlay">
+      <button type="button" id="btnCerrarLightbox">✕</button>
+      <img id="imgLightboxImg" src="">
     </div>
   </div>
 </div>

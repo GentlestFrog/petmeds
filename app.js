@@ -62,8 +62,12 @@ async function safeGetDoc(ref){
   catch(e){ console.error(e); return null; }
 }
 async function safeSetDoc(ref, data){
-  try{ await ref.set(data, {merge:true}); }
-  catch(e){ console.error(e); toast('Error guardando (revisá tu conexión)'); }
+  try{ await ref.set(data, {merge:true}); return true; }
+  catch(e){
+    console.error(e);
+    toast('Error guardando'+(e && e.message ? ': '+e.message : ' (revisá tu conexión)'));
+    return false;
+  }
 }
 async function safeDeleteDoc(ref){
   try{ await ref.delete(); }catch(e){ console.error(e); }
@@ -331,8 +335,8 @@ async function loadMeds(){
 async function saveMed(med){
   const id = med.id || ('m'+Date.now());
   const data = Object.assign({}, med); delete data.id;
-  await safeSetDoc(medsCol(activePetId).doc(id), data);
-  return id;
+  const ok = await safeSetDoc(medsCol(activePetId).doc(id), data);
+  return ok ? id : null;
 }
 async function deleteMed(id){ await safeDeleteDoc(medsCol(activePetId).doc(id)); }
 
@@ -496,7 +500,49 @@ async function guardarHoy(){
   await render();
 }
 
+/* ==================== lightbox de imagen (agrandar foto) ==================== */
+function abrirLightbox(src){
+  document.getElementById('imgLightboxImg').src = src;
+  document.getElementById('imgLightboxOverlay').style.display = 'flex';
+}
+function cerrarLightbox(){
+  document.getElementById('imgLightboxOverlay').style.display = 'none';
+  document.getElementById('imgLightboxImg').src = '';
+}
+document.getElementById('btnCerrarLightbox').addEventListener('click', cerrarLightbox);
+document.getElementById('imgLightboxOverlay').addEventListener('click', (e)=>{
+  if(e.target.id==='imgLightboxOverlay') cerrarLightbox();
+});
+
 /* ==================== vista Medicación ==================== */
+let medFotoActual = null;
+
+function renderMedFotoPreview(){
+  const wrap = document.getElementById('medFotoPreviewWrap');
+  const img = document.getElementById('medFotoPreviewImg');
+  if(!medFotoActual){ wrap.style.display='none'; img.src=''; return; }
+  img.src = medFotoActual;
+  wrap.style.display = '';
+}
+document.getElementById('medFoto').addEventListener('change', async (e)=>{
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Elegí una imagen'); return; }
+  toast('Procesando foto...');
+  try{
+    medFotoActual = await compressImage(file, 1000, 260000);
+    renderMedFotoPreview();
+  }catch(err){
+    console.error(err);
+    toast('No se pudo procesar la foto');
+  }
+});
+document.getElementById('btnQuitarMedFoto').addEventListener('click', ()=>{
+  medFotoActual = null;
+  renderMedFotoPreview();
+});
+
 function resetMedForm(){
   editingMedId = null;
   medTipoActual = 'fijo';
@@ -519,6 +565,8 @@ function resetMedForm(){
   document.getElementById('medFinVeces').value='';
   document.getElementById('medFinFecha').value='';
   document.getElementById('medNotas').value='';
+  medFotoActual = null;
+  renderMedFotoPreview();
   document.getElementById('btnCancelarEdicionMed').style.display='none';
   setMedTipo('fijo');
   setRecDosisModo('fija');
@@ -663,7 +711,7 @@ async function guardarMedForm(){
   const formaIngesta = document.getElementById('medForma').value.trim();
   const notas = document.getElementById('medNotas').value.trim();
   const horarios = horariosForm.filter(h=>h);
-  let med = { id: editingMedId, nombre, formaIngesta, fechaInicio, notas, tipo: medTipoActual, activo:true, horarios };
+  let med = { id: editingMedId, nombre, formaIngesta, fechaInicio, notas, tipo: medTipoActual, activo:true, horarios, foto: medFotoActual||null };
 
   if(medTipoActual==='fijo'){
     const dur = +document.getElementById('medDuracion').value;
@@ -702,6 +750,7 @@ async function guardarMedForm(){
   }
 
   const id = await saveMed(med);
+  if(!id) return;
   toast(editingMedId ? 'Medicación actualizada' : 'Medicación guardada');
   await loadMeds();
   resetMedForm();
@@ -716,6 +765,8 @@ function editarMed(id){
   document.getElementById('medForma').value=med.formaIngesta||'';
   document.getElementById('medFechaInicio').value=med.fechaInicio;
   document.getElementById('medNotas').value=med.notas||'';
+  medFotoActual = med.foto || null;
+  renderMedFotoPreview();
   horariosForm = (med.horarios||[]).slice();
   renderHorariosForm();
   setMedTipo(med.tipo);
@@ -826,8 +877,9 @@ function medCardHtml(med, hoy){
   const tipoLabel = med.tipo==='fijo'?'Fija':med.tipo==='variable'?'Variable':'Recurrente';
   const badgeEstado = med.activo===false ? '<span class="badge inactivo">Inactiva</span>' : (finalizada ? '<span class="badge finalizada">Finalizada</span>' : '');
   const cal = medCalendarUrls(med);
-  return '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><div><h3>'+escapeHtml(med.nombre)+'</h3>'+
-    '<span class="badge '+med.tipo+'">'+tipoLabel+'</span> '+badgeEstado+'</div></div>'+
+  const fotoHtml = med.foto ? '<img src="'+med.foto+'" class="med-photo-thumb" data-lightbox="'+med.id+'">' : '';
+  return '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><div style="display:flex; align-items:center;">'+fotoHtml+'<div><h3>'+escapeHtml(med.nombre)+'</h3>'+
+    '<span class="badge '+med.tipo+'">'+tipoLabel+'</span> '+badgeEstado+'</div></div></div>'+
     '<p class="muted" style="margin:8px 0 2px;">Desde el '+fmtHuman(med.fechaInicio)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+'</p>'+
     '<p class="muted" style="margin:2px 0 10px;">'+infoFin+'</p>'+
     (med.horarios && med.horarios.length ? '<p class="muted" style="margin:0 0 10px;">🕒 Horarios: '+med.horarios.slice().sort().map(fmtHora).join(', ')+'</p>' : '')+
@@ -843,6 +895,9 @@ function medCardHtml(med, hoy){
 }
 
 function wireMedCardButtons(container){
+  container.querySelectorAll('[data-lightbox]').forEach(img=>{
+    img.addEventListener('click', ()=>abrirLightbox(img.src));
+  });
   container.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editarMed(b.dataset.edit)));
   container.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>toggleActivoMed(b.dataset.toggle)));
   container.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ if(confirm('¿Eliminar esta medicación del registro?')) eliminarMed(b.dataset.del); }));
