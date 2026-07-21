@@ -210,21 +210,37 @@ async function agregarMascota(){
   }
 }
 async function renombrarMascota(id, nombre){
-  await safeSetDoc(petsCol().doc(id), {nombre: nombre || 'Mascota'});
+  if(!nombre){ toast('El nombre no puede quedar vacío'); renderPetsList(); return; }
+  await safeSetDoc(petsCol().doc(id), {nombre});
   await loadPets();
+  toast('Nombre actualizado');
   render();
 }
 async function eliminarMascota(id){
   if(pets.length<=1){ toast('Necesitás al menos una mascota'); return; }
-  if(!confirm('¿Eliminar esta mascota y todos sus datos?')) return;
-  const medDocs = await safeListCol(medsCol(id));
-  for(const m of medDocs) await safeDeleteDoc(medsCol(id).doc(m.id));
-  const logDocs = await safeListCol(logsCol(id));
-  for(const l of logDocs) await safeDeleteDoc(logsCol(id).doc(l.id));
+  const p = pets.find(x=>x.id===id);
+  const nombre = p ? p.nombre : 'esta mascota';
+
+  if(!confirm('¿Eliminar a '+nombre+'? Se van a borrar TODOS sus datos: medicaciones, historial, documentos y vacunas.')) return;
+  if(!confirm('Esto no se puede deshacer. Una vez eliminado no hay forma de recuperar la información de '+nombre+'. ¿Continuar?')) return;
+  const confirmacion = prompt('Para confirmar, escribí el nombre exacto de la mascota ("'+nombre+'"):');
+  if(confirmacion===null) return;
+  if(confirmacion.trim().toLowerCase() !== nombre.trim().toLowerCase()){
+    toast('El nombre no coincide, no se eliminó nada');
+    return;
+  }
+
+  toast('Eliminando...');
+  const colecciones = [medsCol(id), logsCol(id), docsCol(id), vacunasCol(id), consultasCol(id)];
+  for(const col of colecciones){
+    const docs = await safeListCol(col);
+    for(const d of docs) await safeDeleteDoc(col.doc(d.id));
+  }
   await safeDeleteDoc(petsCol().doc(id));
   await loadPets();
   if(activePetId===id) await setActivePet(pets[0].id);
   else { renderPetsList(); render(); }
+  toast(nombre+' fue eliminada');
 }
 
 /* ==================== medicaciones: cálculo ==================== */
@@ -1457,14 +1473,34 @@ function renderPetsList(){
     const row = document.createElement('div');
     row.className='pet-row';
     const esActiva = p.id===activePetId;
-    row.innerHTML = '<input type="text" value="'+escapeHtml(p.nombre)+'" data-id="'+p.id+'">'+
+    row.innerHTML = '<span class="pet-nombre">'+escapeHtml(p.nombre)+'</span>'+
+      '<button type="button" class="icon-btn" data-editnombre="'+p.id+'" title="Editar nombre">✎</button>'+
       '<button type="button" class="tag-activa" data-select="'+p.id+'" style="background:'+(esActiva?'var(--pine)':'var(--paper-2)')+'; color:'+(esActiva?'var(--white)':'var(--ink-soft)')+';">'+(esActiva?'Activa':'Elegir')+'</button>'+
-      (pets.length>1 ? '<button type="button" class="icon-btn" data-del="'+p.id+'">✕</button>' : '');
+      (pets.length>1 ? '<button type="button" class="icon-btn" data-del="'+p.id+'" title="Eliminar mascota">✕</button>' : '');
     wrap.appendChild(row);
   });
-  wrap.querySelectorAll('input[data-id]').forEach(inp=>inp.addEventListener('blur', ()=>renombrarMascota(inp.dataset.id, inp.value.trim())));
+  wrap.querySelectorAll('[data-editnombre]').forEach(b=>{
+    b.addEventListener('click', ()=>iniciarEdicionNombrePet(b.closest('.pet-row'), pets.find(p=>p.id===b.dataset.editnombre)));
+  });
   wrap.querySelectorAll('[data-select]').forEach(b=>b.addEventListener('click', ()=>setActivePet(b.dataset.select)));
   wrap.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', ()=>eliminarMascota(b.dataset.del)));
+}
+function iniciarEdicionNombrePet(row, p){
+  if(!p) return;
+  const esActiva = p.id===activePetId;
+  row.innerHTML = '<input type="text" class="pet-edit-input" value="'+escapeHtml(p.nombre)+'">'+
+    '<button type="button" class="icon-btn" data-savenombre title="Guardar">✓</button>'+
+    '<button type="button" class="icon-btn" data-cancelnombre title="Cancelar">✕</button>';
+  const input = row.querySelector('.pet-edit-input');
+  input.focus();
+  input.select();
+  const guardar = ()=>renombrarMascota(p.id, input.value.trim());
+  row.querySelector('[data-savenombre]').addEventListener('click', guardar);
+  row.querySelector('[data-cancelnombre]').addEventListener('click', renderPetsList);
+  input.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter'){ e.preventDefault(); guardar(); }
+    if(e.key==='Escape'){ e.preventDefault(); renderPetsList(); }
+  });
 }
 document.getElementById('btnAgregarMascota').addEventListener('click', agregarMascota);
 
