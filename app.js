@@ -1655,6 +1655,116 @@ function updateCalendarLinks(){
   icsEl.href = 'data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
 }
 
+/* ==================== backup completo ==================== */
+function slugFilename(s){
+  const base = (s||'archivo').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-zA-Z0-9\-_ ]/g,'').trim().replace(/\s+/g,'-').slice(0,60);
+  return base || 'archivo';
+}
+function dataUrlBase64(dataUrl){
+  const idx = dataUrl.indexOf(',');
+  return idx>=0 ? dataUrl.slice(idx+1) : dataUrl;
+}
+function extFromDataUrl(dataUrl, fallback){
+  const m = /^data:([^;]+);/.exec(dataUrl);
+  if(!m) return fallback;
+  const mime = m[1];
+  if(mime==='application/pdf') return 'pdf';
+  if(mime==='image/png') return 'png';
+  if(mime==='image/webp') return 'webp';
+  if(mime==='image/jpeg' || mime==='image/jpg') return 'jpg';
+  return fallback;
+}
+async function descargarBackup(){
+  if(typeof JSZip==='undefined'){
+    toast('No se pudo cargar la herramienta de backup (revisá tu conexión a internet)');
+    return;
+  }
+  const btn = document.getElementById('btnDescargarBackup');
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Preparando backup...';
+  try{
+    const zip = new JSZip();
+    const manifest = { generado: new Date().toISOString(), mascotas: [] };
+    const carpetasUsadas = new Set();
+
+    for(const pet of pets){
+      let carpeta = slugFilename(pet.nombre || 'mascota'), n=2;
+      while(carpetasUsadas.has(carpeta)){ carpeta = slugFilename(pet.nombre||'mascota')+'-'+n; n++; }
+      carpetasUsadas.add(carpeta);
+      const petFolder = zip.folder(carpeta);
+
+      const [medsArr, logsArr, docsArr, vacunasArr, consultasArr] = await Promise.all([
+        safeListCol(medsCol(pet.id)),
+        safeListCol(logsCol(pet.id)),
+        safeListCol(docsCol(pet.id)),
+        safeListCol(vacunasCol(pet.id)),
+        safeListCol(consultasCol(pet.id))
+      ]);
+
+      const medsFolder = petFolder.folder('medicacion-fotos');
+      const medsManifest = medsArr.map(med=>{
+        const m = Object.assign({}, med);
+        if(med.foto){
+          const ext = extFromDataUrl(med.foto, 'jpg');
+          let fname = slugFilename(med.nombre)+'.'+ext, k=2;
+          while(medsFolder.file(fname)){ fname = slugFilename(med.nombre)+'-'+k+'.'+ext; k++; }
+          medsFolder.file(fname, dataUrlBase64(med.foto), {base64:true});
+          m.foto = 'medicacion-fotos/'+fname;
+        }
+        return m;
+      });
+
+      const docsFolder = petFolder.folder('documentos');
+      const docsManifest = docsArr.map(doc=>{
+        const d = Object.assign({}, doc);
+        const archivos = doc.archivos || (doc.imagen ? [{tipo:'image', nombre:'imagen', data:doc.imagen}] : []);
+        d.archivos = archivos.map((a, idx)=>{
+          const ext = extFromDataUrl(a.data, a.tipo==='pdf'?'pdf':'jpg');
+          const base = slugFilename(doc.titulo)+(archivos.length>1 ? '-'+(idx+1) : '');
+          let fname = base+'.'+ext, k=2;
+          while(docsFolder.file(fname)){ fname = base+'-'+k+'.'+ext; k++; }
+          docsFolder.file(fname, dataUrlBase64(a.data), {base64:true});
+          return { nombre: a.nombre, tipo: a.tipo, archivo: 'documentos/'+fname };
+        });
+        delete d.imagen;
+        return d;
+      });
+
+      manifest.mascotas.push({
+        nombre: pet.nombre,
+        carpeta: carpeta,
+        medicaciones: medsManifest,
+        historial: logsArr,
+        documentos: docsManifest,
+        vacunas: vacunasArr,
+        paraElVet: consultasArr
+      });
+    }
+
+    zip.file('datos.json', JSON.stringify(manifest, null, 2));
+
+    const blob = await zip.generateAsync({type:'blob'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'backup-petmeds-'+todayStr()+'.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    toast('Backup descargado');
+  }catch(err){
+    console.error(err);
+    toast('No se pudo generar el backup'+(err && err.message ? ': '+err.message : ''));
+  }finally{
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+  }
+}
+document.getElementById('btnDescargarBackup').addEventListener('click', descargarBackup);
+
 /* ==================== navegación ==================== */
 function switchView(name){
   if(name!=='documentos' && modoSeleccionDocs) salirModoSeleccionDocs();
