@@ -286,12 +286,13 @@ function dosisEnFecha(med, dateStr){
   if(med.tipo==='fijo'){ return diff <= (med.duracionDias||1)-1 ? med.dosisFija : null; }
   if(med.tipo==='variable'){ const arr=med.dosisPorDia||[]; return diff<arr.length ? arr[diff].dosis : null; }
   if(med.tipo==='recurrente'){
-    const k = ocurrenciaIndice(med, dateStr);
-    if(k===null || !ocurrenciaDentroDeLimite(med,k)) return null;
+    if(estaFinalizada(med, dateStr)) return null;
+    const proxima = med.proximaFecha || med.fechaInicio;
+    if(dateStr < proxima) return null;
     if(med.dosisModo==='variable'){
       const arr = med.dosisPorCiclo||[];
       if(arr.length===0) return null;
-      const idx = Math.min(k, arr.length-1);
+      const idx = Math.min(med.vecesDadas||0, arr.length-1);
       return arr[idx].dosis;
     }
     return med.dosisRec;
@@ -300,9 +301,10 @@ function dosisEnFecha(med, dateStr){
 }
 function vezDeRecurrente(med, dateStr){
   if(med.tipo!=='recurrente') return null;
-  const k = ocurrenciaIndice(med, dateStr);
-  if(k===null || !ocurrenciaDentroDeLimite(med,k)) return null;
-  return k+1;
+  if(estaFinalizada(med, dateStr)) return null;
+  const proxima = med.proximaFecha || med.fechaInicio;
+  if(dateStr < proxima) return null;
+  return (med.vecesDadas||0)+1;
 }
 function horariosDe(med){
   return (med.horarios && med.horarios.length>0) ? med.horarios.slice().sort() : ['_default'];
@@ -455,6 +457,8 @@ async function renderHoy(){
   const listEl = document.getElementById('medsHoyList');
   const card = document.getElementById('medsHoyCard');
   const activos = meds.filter(m=>m.activo!==false);
+  const log = (await loadLog(selectedDate)) || {fecha:selectedDate, sintomas:'', apetito:'', animo:'', notas:'', medicacionesTomadas:{}, completado:false};
+
   const delDia = [];
   activos.forEach(m=>{
     const dosis = dosisEnFecha(m, selectedDate);
@@ -462,13 +466,22 @@ async function renderHoy(){
       horariosDe(m).forEach(h=>delDia.push({med:m, dosis, horario:h}));
     }
   });
+  // tomas recurrentes ya registradas ese día aunque ya no figuren como pendientes
+  activos.forEach(m=>{
+    if(m.tipo!=='recurrente') return;
+    if(delDia.some(x=>x.med.id===m.id)) return;
+    const tomadas = log.medicacionesTomadas && log.medicacionesTomadas[m.id];
+    if(!tomadas) return;
+    const horarios = horariosDe(m);
+    if(!horarios.some(h=>tomadas[h])) return;
+    const dosisTxt = m.dosisRec || (m.dosisPorCiclo && m.dosisPorCiclo.length ? m.dosisPorCiclo[m.dosisPorCiclo.length-1].dosis : 'según correspondía');
+    horarios.forEach(h=>delDia.push({med:m, dosis:dosisTxt, horario:h}));
+  });
   delDia.sort((a,b)=>{
     const ta = a.horario==='_default' ? '' : a.horario;
     const tb = b.horario==='_default' ? '' : b.horario;
     return ta.localeCompare(tb) || a.med.nombre.localeCompare(b.med.nombre);
   });
-
-  const log = (await loadLog(selectedDate)) || {fecha:selectedDate, sintomas:'', apetito:'', animo:'', notas:'', medicacionesTomadas:{}, completado:false};
 
   if(delDia.length===0){ card.style.display='none'; }
   else{
@@ -481,7 +494,11 @@ async function renderHoy(){
       const diaInfo = diaXdeY(med, selectedDate);
       let diaTxt = '';
       if(diaInfo) diaTxt = ' · Día '+diaInfo.actual+' de '+diaInfo.total;
-      else { const vez = vezDeRecurrente(med, selectedDate); if(vez) diaTxt = ' · Vez '+vez; }
+      else {
+        const vez = vezDeRecurrente(med, selectedDate);
+        if(vez) diaTxt = ' · Vez '+vez;
+        if(med.tipo==='recurrente' && !checked && selectedDate > (med.proximaFecha||med.fechaInicio)) diaTxt += ' · ⚠️ atrasada';
+      }
       const horarioTxt = horario!=='_default' ? escapeHtml(fmtHora(horario))+' · ' : '';
       row.innerHTML = '<input type="checkbox" data-medid="'+med.id+'" data-horario="'+escapeHtml(horario)+'" '+(checked?'checked':'')+'>'+
         '<div class="info"><b>'+escapeHtml(med.nombre)+'</b><div>'+horarioTxt+escapeHtml(dosis)+(med.formaIngesta?' · '+escapeHtml(med.formaIngesta):'')+diaTxt+'</div></div>';
@@ -495,13 +512,46 @@ async function renderHoy(){
   document.getElementById('logNotas').value = log.notas||'';
 }
 
+function medDadoCompleto(tomadasObj, med){
+  if(!tomadasObj) return false;
+  return horariosDe(med).every(h=>!!tomadasObj[h]);
+}
 async function guardarHoy(){
+  const prevLog = (await loadLog(selectedDate)) || {medicacionesTomadas:{}};
   const medsMarcados = {};
   document.querySelectorAll('#medsHoyList input[type=checkbox]').forEach(chk=>{
     const mid = chk.dataset.medid, hor = chk.dataset.horario;
     medsMarcados[mid] = medsMarcados[mid] || {};
     medsMarcados[mid][hor] = chk.checked;
   });
+
+  for(const mid of Object.keys(medsMarcados)){
+    const med = meds.find(m=>m.id===mid);
+    if(!med || med.tipo!=='recurrente') continue;
+    const dadoAhora = medDadoCompleto(medsMarcados[mid], med);
+    const dadoAntes = medDadoCompleto(prevLog.medicacionesTomadas && prevLog.medicacionesTomadas[mid], med);
+    const n = getIntervaloNum(med);
+    if(dadoAhora && !dadoAntes){
+      const nuevaProxima = getUnidadIntervalo(med)==='meses' ? addMonths(selectedDate, n) : addDays(selectedDate, n);
+      const proximaAnterior = med.proximaFecha, vecesAnteriores = med.vecesDadas||0;
+      med.proximaFecha = nuevaProxima;
+      med.vecesDadas = vecesAnteriores+1;
+      const ok = await safeSetDoc(medsCol(activePetId).doc(mid), {proximaFecha: med.proximaFecha, vecesDadas: med.vecesDadas});
+      if(!ok){ med.proximaFecha = proximaAnterior; med.vecesDadas = vecesAnteriores; }
+    } else if(!dadoAhora && dadoAntes){
+      const esperada = getUnidadIntervalo(med)==='meses' ? addMonths(selectedDate, n) : addDays(selectedDate, n);
+      if(med.proximaFecha===esperada && (med.vecesDadas||0)>0){
+        const proximaAnterior = med.proximaFecha, vecesAnteriores = med.vecesDadas;
+        med.proximaFecha = selectedDate;
+        med.vecesDadas = vecesAnteriores-1;
+        const ok = await safeSetDoc(medsCol(activePetId).doc(mid), {proximaFecha: med.proximaFecha, vecesDadas: med.vecesDadas});
+        if(!ok){ med.proximaFecha = proximaAnterior; med.vecesDadas = vecesAnteriores; }
+      } else {
+        toast('Solo se puede deshacer la toma más reciente de "'+med.nombre+'"');
+      }
+    }
+  }
+
   const log = {
     fecha: selectedDate,
     sintomas: document.getElementById('logSintomas').value.trim(),
@@ -763,6 +813,10 @@ async function guardarMedForm(){
       if(vecesRecurrente.some(v=>!v.dosis.trim())){ toast('Completá la dosis de cada vez'); return; }
       med.dosisPorCiclo = vecesRecurrente.map((v,i)=>({ciclo:i+1, dosis:v.dosis.trim()}));
     }
+    if(!editingMedId){
+      med.proximaFecha = fechaInicio;
+      med.vecesDadas = 0;
+    }
   }
 
   const id = await saveMed(med);
@@ -833,7 +887,9 @@ let inactivasAbiertas = false;
 function estaFinalizada(med, hoy){
   if(med.tipo==='recurrente'){
     if(!med.finModo || med.finModo==='nunca') return false;
-    return proximaTomaRecurrente(med, hoy) === null;
+    if(med.finModo==='veces') return (med.vecesDadas||0) >= (med.finVeces||1);
+    if(med.finModo==='fecha' && med.finFecha) return (med.proximaFecha||med.fechaInicio) > med.finFecha;
+    return false;
   }
   const fin = fechaFinMed(med);
   return !!(fin && hoy > fin);
@@ -873,15 +929,18 @@ function medCardHtml(med, hoy){
   let infoFin='';
   const finalizada = estaFinalizada(med, hoy);
   if(med.tipo==='recurrente'){
-    const prox = proximaTomaRecurrente(med, hoy);
+    const prox = finalizada ? null : (med.proximaFecha || med.fechaInicio);
     const unidadTxt = getUnidadIntervalo(med)==='meses' ? (getIntervaloNum(med)===1?'mes':'meses') : (getIntervaloNum(med)===1?'día':'días');
     if(prox===null){
       infoFin = 'Completó todas las tomas programadas.';
+    } else if(prox < hoy){
+      infoFin = '⚠️ Atrasada desde el <b>'+fmtHuman(prox)+'</b> · se repite cada '+getIntervaloNum(med)+' '+unidadTxt;
+      if(med.dosisModo==='variable') infoFin += ' · dosis varía según la vez';
     } else {
       infoFin = 'Próxima toma: <b>'+fmtHuman(prox)+'</b> · se repite cada '+getIntervaloNum(med)+' '+unidadTxt;
       if(med.dosisModo==='variable') infoFin += ' · dosis varía según la vez';
     }
-    if(med.finModo==='veces') infoFin += ' · hasta '+med.finVeces+' veces';
+    if(med.finModo==='veces') infoFin += ' · '+(med.vecesDadas||0)+' de '+med.finVeces+' veces';
     else if(med.finModo==='fecha') infoFin += ' · hasta el '+fmtHuman(med.finFecha);
   } else {
     const fin = fechaFinMed(med);
@@ -1832,7 +1891,7 @@ async function render(){
     if(dosisEnFecha(m, hoy)!==null) return false;
     let inicioProx = null;
     if(m.tipo==='recurrente'){
-      inicioProx = proximaTomaRecurrente(m, addDays(hoy,1));
+      inicioProx = m.proximaFecha || m.fechaInicio;
     } else if(m.fechaInicio > hoy){
       inicioProx = m.fechaInicio;
     }
