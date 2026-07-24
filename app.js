@@ -1131,24 +1131,77 @@ document.getElementById('btnGuardarVacuna').addEventListener('click', guardarVac
 document.getElementById('btnCancelarEdicionVacuna').addEventListener('click', resetVacunaForm);
 
 /* ==================== vista Historial ==================== */
+let histBusqueda = '';
+function normalizarTexto(s){
+  return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+}
+function snippetConContexto(texto, termino, contexto){
+  contexto = contexto||40;
+  texto = texto||'';
+  if(!termino) return texto.length>80 ? texto.slice(0,80)+'…' : texto;
+  const idx = normalizarTexto(texto).indexOf(normalizarTexto(termino));
+  if(idx===-1) return texto.length>80 ? texto.slice(0,80)+'…' : texto;
+  const inicio = Math.max(0, idx-contexto);
+  const fin = Math.min(texto.length, idx+termino.length+contexto);
+  let snippet = texto.slice(inicio, fin);
+  if(inicio>0) snippet = '…'+snippet;
+  if(fin<texto.length) snippet += '…';
+  return snippet;
+}
+function resaltar(texto, termino){
+  if(!termino) return escapeHtml(texto);
+  const idx = normalizarTexto(texto).indexOf(normalizarTexto(termino));
+  if(idx===-1) return escapeHtml(texto);
+  const antes = texto.slice(0, idx), match = texto.slice(idx, idx+termino.length), despues = texto.slice(idx+termino.length);
+  return escapeHtml(antes)+'<mark>'+escapeHtml(match)+'</mark>'+escapeHtml(despues);
+}
 async function renderHistorial(){
   const wrap = document.getElementById('histList');
+  const infoEl = document.getElementById('histBuscarInfo');
   wrap.innerHTML = '<p class="muted">Cargando...</p>';
   if(!activePetId){ wrap.innerHTML=''; return; }
-  const docs = await safeListCol(logsCol(activePetId));
+  let docs = await safeListCol(logsCol(activePetId));
   docs.sort((a,b)=> b.id.localeCompare(a.id));
-  if(docs.length===0){ wrap.innerHTML='<div class="empty-state"><span class="big">📖</span>Todavía no hay registros guardados.</div>'; return; }
+
+  const termino = histBusqueda.trim();
+  if(termino){
+    const normTermino = normalizarTexto(termino);
+    docs = docs.filter(log=>normalizarTexto((log.sintomas||'')+' '+(log.notas||'')).includes(normTermino));
+    infoEl.style.display = '';
+    infoEl.textContent = docs.length===0
+      ? 'No se encontraron registros con "'+termino+'".'
+      : docs.length+' resultado'+(docs.length===1?'':'s')+' para "'+termino+'".';
+  } else {
+    infoEl.style.display = 'none';
+  }
+
+  if(docs.length===0){
+    wrap.innerHTML = termino
+      ? '<div class="empty-state"><span class="big">🔍</span>No encontramos nada con "'+escapeHtml(termino)+'".</div>'
+      : '<div class="empty-state"><span class="big">📖</span>Todavía no hay registros guardados.</div>';
+    return;
+  }
   wrap.innerHTML='';
   docs.forEach(log=>{
     const item = document.createElement('div');
     item.className='hist-item';
-    const resumen = log.sintomas ? log.sintomas.slice(0,60)+(log.sintomas.length>60?'…':'') : 'Sin novedades registradas';
-    item.innerHTML = '<div><div class="d">'+fmtHuman(log.id)+'</div><div class="s">'+escapeHtml(resumen)+'</div></div>'+
+    let campo = log.sintomas || '';
+    if(termino){
+      const enSintomas = normalizarTexto(log.sintomas||'').includes(normalizarTexto(termino));
+      if(!enSintomas && normalizarTexto(log.notas||'').includes(normalizarTexto(termino))) campo = log.notas;
+    }
+    const snippet = campo ? snippetConContexto(campo, termino) : '';
+    const resumenHtml = snippet ? (termino ? resaltar(snippet, termino) : escapeHtml(snippet)) : 'Sin novedades registradas';
+    item.innerHTML = '<div><div class="d">'+fmtHuman(log.id)+'</div><div class="s">'+resumenHtml+'</div></div>'+
       '<div class="dot-status '+(log.completado?'ok':'miss')+'"></div>';
     item.addEventListener('click', ()=>{ selectedDate=log.id; switchView('hoy'); });
     wrap.appendChild(item);
   });
 }
+document.getElementById('histBuscar').addEventListener('input', (e)=>{
+  histBusqueda = e.target.value;
+  renderHistorial();
+});
 document.getElementById('histFechaPicker').addEventListener('change', (e)=>{
   if(e.target.value){ selectedDate=e.target.value; switchView('hoy'); }
 });
