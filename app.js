@@ -1155,6 +1155,9 @@ function resaltar(texto, termino){
   const antes = texto.slice(0, idx), match = texto.slice(idx, idx+termino.length), despues = texto.slice(idx+termino.length);
   return escapeHtml(antes)+'<mark>'+escapeHtml(match)+'</mark>'+escapeHtml(despues);
 }
+function logTieneNovedades(log){
+  return !!((log.sintomas||'').trim() || (log.notas||'').trim() || log.apetito || log.animo);
+}
 async function renderHistorial(){
   const wrap = document.getElementById('histList');
   const infoEl = document.getElementById('histBuscarInfo');
@@ -1162,6 +1165,8 @@ async function renderHistorial(){
   if(!activePetId){ wrap.innerHTML=''; return; }
   let docs = await safeListCol(logsCol(activePetId));
   docs.sort((a,b)=> b.id.localeCompare(a.id));
+  const totalConRegistro = docs.length;
+  docs = docs.filter(logTieneNovedades);
 
   const termino = histBusqueda.trim();
   if(termino){
@@ -1176,9 +1181,10 @@ async function renderHistorial(){
   }
 
   if(docs.length===0){
-    wrap.innerHTML = termino
-      ? '<div class="empty-state"><span class="big">🔍</span>No encontramos nada con "'+escapeHtml(termino)+'".</div>'
-      : '<div class="empty-state"><span class="big">📖</span>Todavía no hay registros guardados.</div>';
+    let msg = 'Todavía no hay registros guardados.';
+    if(termino) msg = 'No encontramos nada con "'+escapeHtml(termino)+'".';
+    else if(totalConRegistro>0) msg = 'Todavía no hay días con novedades registradas.';
+    wrap.innerHTML = '<div class="empty-state"><span class="big">'+(termino?'🔍':'📖')+'</span>'+msg+'</div>';
     return;
   }
   wrap.innerHTML='';
@@ -1191,7 +1197,7 @@ async function renderHistorial(){
       if(!enSintomas && normalizarTexto(log.notas||'').includes(normalizarTexto(termino))) campo = log.notas;
     }
     const snippet = campo ? snippetConContexto(campo, termino) : '';
-    const resumenHtml = snippet ? (termino ? resaltar(snippet, termino) : escapeHtml(snippet)) : 'Sin novedades registradas';
+    const resumenHtml = snippet ? (termino ? resaltar(snippet, termino) : escapeHtml(snippet)) : 'Sin novedades en el texto (apetito/ánimo registrado)';
     item.innerHTML = '<div><div class="d">'+fmtHuman(log.id)+'</div><div class="s">'+resumenHtml+'</div></div>'+
       '<div class="dot-status '+(log.completado?'ok':'miss')+'"></div>';
     item.addEventListener('click', ()=>{ selectedDate=log.id; switchView('hoy'); });
