@@ -175,8 +175,8 @@
   .doc-attach-pdf{position:relative; display:flex; align-items:center; gap:6px; background:var(--paper-2); border-radius:8px; padding:6px 22px 6px 10px; font-size:12px; max-width:150px;}
   .doc-attach-pdf .doc-attach-name{max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .doc-attach-remove{position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; background:var(--rust); color:var(--white); border:none; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;}
-  #medFotoPreviewWrap{margin:8px 0 4px;}
-  .med-photo-thumb{width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid var(--line); flex:none; margin-right:10px;}
+  #medFotoPreviewWrap, #vacFotoPreviewWrap{margin:8px 0 4px;}
+  .med-photo-thumb, .vac-photo-thumb{width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid var(--line); flex:none; margin-right:10px;}
   .doc-attach-pdf .doc-attach-remove{top:2px; right:2px; width:16px; height:16px; font-size:9px;}
 
   .docs-toolbar{display:flex; justify-content:flex-end; margin-bottom:10px;}
@@ -244,6 +244,7 @@
     width:36px; height:36px; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center;
   }
   .med-photo-thumb{cursor:pointer;}
+  .vac-photo-thumb{cursor:pointer;}
 </style>
 </head>
 <body>
@@ -445,6 +446,14 @@
             <input type="date" id="vacFechaProxima">
             <label>Notas (opcional)</label>
             <textarea id="vacNotas" placeholder="Lote, veterinaria, observaciones..."></textarea>
+            <label>Foto (opcional)</label>
+            <input type="file" id="vacFoto" accept="image/*">
+            <div id="vacFotoPreviewWrap" style="display:none;">
+              <div class="doc-attach-img">
+                <img id="vacFotoPreviewImg" src="">
+                <button type="button" class="doc-attach-remove" id="btnQuitarVacFoto">✕</button>
+              </div>
+            </div>
             <button class="primary" id="btnGuardarVacuna">Guardar vacuna</button>
             <button class="secondary" id="btnCancelarEdicionVacuna" style="display:none;">Cancelar edición</button>
           </div>

@@ -1039,6 +1039,33 @@ document.querySelectorAll('#medsVacunasSeg button').forEach(b=>{
 /* ==================== vacunas ==================== */
 function vacunasCol(petId){ return petsCol().doc(petId).collection('vacunas'); }
 
+let vacFotoActual = null;
+function renderVacFotoPreview(){
+  const wrap = document.getElementById('vacFotoPreviewWrap');
+  const img = document.getElementById('vacFotoPreviewImg');
+  if(!vacFotoActual){ wrap.style.display='none'; img.src=''; return; }
+  img.src = vacFotoActual;
+  wrap.style.display = '';
+}
+document.getElementById('vacFoto').addEventListener('change', async (e)=>{
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Elegí una imagen'); return; }
+  toast('Procesando foto...');
+  try{
+    vacFotoActual = await compressImage(file, 1000, 260000);
+    renderVacFotoPreview();
+  }catch(err){
+    console.error(err);
+    toast('No se pudo procesar la foto');
+  }
+});
+document.getElementById('btnQuitarVacFoto').addEventListener('click', ()=>{
+  vacFotoActual = null;
+  renderVacFotoPreview();
+});
+
 function resetVacunaForm(){
   editingVacunaId = null;
   document.getElementById('vacunaFormTitle').textContent = 'Agregar vacuna';
@@ -1046,6 +1073,8 @@ function resetVacunaForm(){
   document.getElementById('vacFechaAplicada').value = todayStr();
   document.getElementById('vacFechaProxima').value = '';
   document.getElementById('vacNotas').value = '';
+  vacFotoActual = null;
+  renderVacFotoPreview();
   document.getElementById('btnCancelarEdicionVacuna').style.display = 'none';
 }
 
@@ -1055,7 +1084,7 @@ async function guardarVacuna(){
   const fechaProxima = document.getElementById('vacFechaProxima').value || '';
   const notas = document.getElementById('vacNotas').value.trim();
   if(!nombre){ toast('Poné el nombre de la vacuna'); return; }
-  const data = {nombre, fechaAplicada, fechaProxima, notas};
+  const data = {nombre, fechaAplicada, fechaProxima, notas, foto: vacFotoActual||null};
   try{
     if(editingVacunaId){
       await vacunasCol(activePetId).doc(editingVacunaId).set(data, {merge:true});
@@ -1080,6 +1109,8 @@ function editarVacuna(v){
   document.getElementById('vacFechaAplicada').value = v.fechaAplicada;
   document.getElementById('vacFechaProxima').value = v.fechaProxima || '';
   document.getElementById('vacNotas').value = v.notas || '';
+  vacFotoActual = v.foto || null;
+  renderVacFotoPreview();
   document.getElementById('btnCancelarEdicionVacuna').style.display = '';
   document.getElementById('vacunaFormTitle').scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -1109,10 +1140,11 @@ async function renderVacunas(){
       if(v.fechaProxima < hoy) estadoBadge = '<span class="badge" style="background:var(--rust); color:var(--white);">Refuerzo vencido</span>';
       else if(diffDays(hoy, v.fechaProxima) <= 30) estadoBadge = '<span class="badge fijo">Refuerzo próximo</span>';
     }
+    const fotoHtml = v.foto ? '<img src="'+v.foto+'" class="vac-photo-thumb" data-lightbox="'+v.id+'">' : '';
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML =
-      '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><h3>'+escapeHtml(v.nombre)+'</h3>'+estadoBadge+'</div>'+
+      '<div style="display:flex; justify-content:space-between; align-items:flex-start;"><div style="display:flex; align-items:center;">'+fotoHtml+'<h3>'+escapeHtml(v.nombre)+'</h3></div>'+estadoBadge+'</div>'+
       '<p class="muted" style="margin:8px 0 2px;">Aplicada el '+fmtHuman(v.fechaAplicada)+'</p>'+
       (v.fechaProxima ? '<p class="muted" style="margin:2px 0 10px;">Próximo refuerzo: <b>'+fmtHuman(v.fechaProxima)+'</b></p>' : '')+
       (v.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(v.notas)+'</p>' : '')+
@@ -1120,6 +1152,9 @@ async function renderVacunas(){
       '<button class="ghost-small" data-edit="'+v.id+'" style="color:var(--pine);">Editar</button>'+
       '<button class="ghost-small" data-del="'+v.id+'">Eliminar</button></div>';
     wrap.appendChild(card);
+  });
+  wrap.querySelectorAll('[data-lightbox]').forEach(img=>{
+    img.addEventListener('click', ()=>abrirLightbox(img.src));
   });
   wrap.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=>{
     const v = vacs.find(x=>x.id===b.dataset.edit);
