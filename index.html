@@ -567,8 +567,15 @@
 
         <div class="card">
           <h3>Copia de seguridad</h3>
-          <p class="muted">Descargá un archivo .zip con todos los datos cargados: mascotas, medicaciones (con sus fotos), historial, documentos adjuntos y vacunas. Sirve como backup o para llevarlo a otro lado.</p>
+          <p class="muted">Descargá un archivo .zip con todos los datos cargados: mascotas, medicaciones (con sus fotos), historial, documentos adjuntos y vacunas (con sus fotos). Sirve como backup o para llevarlo a otro lado.</p>
           <button class="secondary" id="btnDescargarBackup" type="button">⬇️ Descargar backup completo</button>
+        </div>
+
+        <div class="card">
+          <h3>Restaurar backup</h3>
+          <p class="muted">Subí un archivo .zip generado con "Descargar backup completo". Se van a crear mascotas <b>nuevas</b> con todos sus datos — no se sobrescribe ni se borra nada de lo que ya tenés cargado.</p>
+          <input type="file" id="inputRestaurarBackup" accept=".zip">
+          <p class="muted" id="restaurarBackupInfo" style="margin:8px 0 0; display:none;"></p>
         </div>
 
         <div class="card">

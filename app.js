@@ -1921,13 +1921,26 @@ async function descargarBackup(){
         return d;
       });
 
+      const vacFolder = petFolder.folder('vacunas-fotos');
+      const vacunasManifest = vacunasArr.map(vac=>{
+        const v = Object.assign({}, vac);
+        if(vac.foto){
+          const ext = extFromDataUrl(vac.foto, 'jpg');
+          let fname = slugFilename(vac.nombre)+'.'+ext, k=2;
+          while(vacFolder.file(fname)){ fname = slugFilename(vac.nombre)+'-'+k+'.'+ext; k++; }
+          vacFolder.file(fname, dataUrlBase64(vac.foto), {base64:true});
+          v.foto = 'vacunas-fotos/'+fname;
+        }
+        return v;
+      });
+
       manifest.mascotas.push({
         nombre: pet.nombre,
         carpeta: carpeta,
         medicaciones: medsManifest,
         historial: logsArr,
         documentos: docsManifest,
-        vacunas: vacunasArr,
+        vacunas: vacunasManifest,
         paraElVet: consultasArr
       });
     }
@@ -1953,6 +1966,125 @@ async function descargarBackup(){
   }
 }
 document.getElementById('btnDescargarBackup').addEventListener('click', descargarBackup);
+
+async function archivoZipADataUrl(zip, carpeta, rutaRelativa){
+  if(!rutaRelativa) return null;
+  const entry = zip.file(carpeta+'/'+rutaRelativa);
+  if(!entry) return null;
+  const base64 = await entry.async('base64');
+  const ext = rutaRelativa.split('.').pop().toLowerCase();
+  const mime = ext==='pdf' ? 'application/pdf' : ext==='png' ? 'image/png' : ext==='webp' ? 'image/webp' : 'image/jpeg';
+  return 'data:'+mime+';base64,'+base64;
+}
+
+async function restaurarBackup(file){
+  if(typeof JSZip==='undefined'){
+    toast('No se pudo cargar la herramienta de backup (revisá tu conexión a internet)');
+    return;
+  }
+  const input = document.getElementById('inputRestaurarBackup');
+  const infoEl = document.getElementById('restaurarBackupInfo');
+  infoEl.style.display = 'none';
+
+  let zip, manifest;
+  try{
+    zip = await JSZip.loadAsync(file);
+    const datosFile = zip.file('datos.json');
+    if(!datosFile) throw new Error('El archivo no parece un backup válido (falta datos.json)');
+    manifest = JSON.parse(await datosFile.async('string'));
+  }catch(err){
+    console.error(err);
+    toast('No se pudo leer el backup: '+(err && err.message ? err.message : 'archivo inválido'));
+    input.value = '';
+    return;
+  }
+
+  if(!manifest.mascotas || manifest.mascotas.length===0){
+    toast('El backup no tiene mascotas para restaurar');
+    input.value = '';
+    return;
+  }
+
+  const nombres = manifest.mascotas.map(m=>m.nombre).join(', ');
+  if(!confirm('Se van a crear '+manifest.mascotas.length+' mascota(s) nueva(s) a partir del backup: '+nombres+'.\n\nNo se sobrescribe ni se borra nada de lo que ya tenés cargado. ¿Continuar?')){
+    input.value = '';
+    return;
+  }
+
+  input.disabled = true;
+  infoEl.style.display = '';
+  infoEl.textContent = 'Restaurando...';
+
+  try{
+    for(const m of manifest.mascotas){
+      infoEl.textContent = 'Restaurando "'+m.nombre+'"...';
+      const petRef = petsCol().doc();
+      await petRef.set({nombre: m.nombre || 'Mascota'});
+      const petId = petRef.id;
+      const carpeta = m.carpeta || slugFilename(m.nombre);
+
+      for(const med of (m.medicaciones||[])){
+        const data = Object.assign({}, med);
+        delete data.id;
+        if(data.foto && !data.foto.startsWith('data:')){
+          data.foto = await archivoZipADataUrl(zip, carpeta, data.foto);
+        }
+        await medsCol(petId).add(data);
+      }
+
+      for(const log of (m.historial||[])){
+        const data = Object.assign({}, log);
+        const fecha = data.id || data.fecha;
+        delete data.id;
+        if(fecha) await logsCol(petId).doc(fecha).set(data);
+      }
+
+      for(const doc of (m.documentos||[])){
+        const data = Object.assign({}, doc);
+        delete data.id;
+        if(data.archivos){
+          data.archivos = await Promise.all(data.archivos.map(async a=>{
+            const dataUrl = a.archivo ? await archivoZipADataUrl(zip, carpeta, a.archivo) : null;
+            return { tipo: a.tipo, nombre: a.nombre, data: dataUrl };
+          }));
+          data.archivos = data.archivos.filter(a=>a.data);
+        }
+        await docsCol(petId).add(data);
+      }
+
+      for(const vac of (m.vacunas||[])){
+        const data = Object.assign({}, vac);
+        delete data.id;
+        if(data.foto && !data.foto.startsWith('data:')){
+          data.foto = await archivoZipADataUrl(zip, carpeta, data.foto);
+        }
+        await vacunasCol(petId).add(data);
+      }
+
+      for(const item of (m.paraElVet||[])){
+        const data = Object.assign({}, item);
+        delete data.id;
+        await consultasCol(petId).add(data);
+      }
+    }
+
+    await loadPets();
+    render();
+    infoEl.textContent = '✅ Backup restaurado correctamente.';
+    toast('Backup restaurado');
+  }catch(err){
+    console.error(err);
+    infoEl.textContent = '⚠️ Hubo un problema restaurando el backup.';
+    toast('No se pudo restaurar el backup por completo: '+(err && err.message ? err.message : ''));
+  }finally{
+    input.disabled = false;
+    input.value = '';
+  }
+}
+document.getElementById('inputRestaurarBackup').addEventListener('change', (e)=>{
+  const file = e.target.files && e.target.files[0];
+  if(file) restaurarBackup(file);
+});
 
 /* ==================== navegación ==================== */
 function switchView(name){
