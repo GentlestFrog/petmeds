@@ -909,7 +909,7 @@ function medCalendarUrls(med){
   const hora = (med.horarios && med.horarios[0]) ? med.horarios[0] : '09:00';
   const startStr = buildDateTimeStr(med.fechaInicio, hora);
   const [hh,mm] = hora.split(':').map(Number);
-  let endH=hh, endM=mm+15;
+  let endH=hh, endM=mm+30;
   if(endM>=60){ endM-=60; endH+=1; if(endH>=24) endH-=24; }
   const endStr = buildDateTimeStr(med.fechaInicio, pad(endH)+':'+pad(endM));
   const dosisTxt = med.tipo==='fijo' ? (med.dosisFija||'') : (med.tipo==='recurrente' ? (med.dosisRec||'según corresponda') : 'según el día');
@@ -919,6 +919,21 @@ function medCalendarUrls(med){
     '&dates='+startStr+'/'+endStr+'&recur='+encodeURIComponent('RRULE:'+rrule)+'&details='+encodeURIComponent(detalleTxt);
   const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//DiarioDeSalud//ES','BEGIN:VEVENT','UID:med-'+med.id+'@local',
     'DTSTAMP:'+nowUTCStr(),'DTSTART:'+startStr,'DTEND:'+endStr,'RRULE:'+rrule,'SUMMARY:Medicación: '+med.nombre,
+    'DESCRIPTION:'+detalleTxt.replace(/[\r\n,]/g,' '),'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+  const icsUrl = 'data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
+  return {gcalUrl, icsUrl};
+}
+
+function vacunaCalendarUrls(vac){
+  if(!vac.fechaProxima) return null;
+  const startStr = buildDateTimeStr(vac.fechaProxima, '09:00');
+  const endStr = buildDateTimeStr(vac.fechaProxima, '09:30');
+  const detalleTxt = 'Refuerzo de vacuna'+(vac.notas?' · '+vac.notas:'');
+  const gcalUrl = 'https://calendar.google.com/calendar/render?action=TEMPLATE&text='+encodeURIComponent('Vacuna: '+vac.nombre)+
+    '&dates='+startStr+'/'+endStr+'&details='+encodeURIComponent(detalleTxt);
+  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//DiarioDeSalud//ES','BEGIN:VEVENT','UID:vac-'+vac.id+'@local',
+    'DTSTAMP:'+nowUTCStr(),'DTSTART:'+startStr,'DTEND:'+endStr,'SUMMARY:Vacuna: '+vac.nombre,
     'DESCRIPTION:'+detalleTxt.replace(/[\r\n,]/g,' '),'END:VEVENT','END:VCALENDAR'
   ].join('\r\n');
   const icsUrl = 'data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
@@ -1141,6 +1156,7 @@ async function renderVacunas(){
       else if(diffDays(hoy, v.fechaProxima) <= 30) estadoBadge = '<span class="badge fijo">Refuerzo próximo</span>';
     }
     const fotoHtml = v.foto ? '<img src="'+v.foto+'" class="vac-photo-thumb" data-lightbox="'+v.id+'">' : '';
+    const cal = vacunaCalendarUrls(v);
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML =
@@ -1150,7 +1166,11 @@ async function renderVacunas(){
       (v.notas ? '<p class="muted" style="margin:0 0 10px;">📝 '+escapeHtml(v.notas)+'</p>' : '')+
       '<div style="display:flex; gap:14px;">'+
       '<button class="ghost-small" data-edit="'+v.id+'" style="color:var(--pine);">Editar</button>'+
-      '<button class="ghost-small" data-del="'+v.id+'">Eliminar</button></div>';
+      '<button class="ghost-small" data-del="'+v.id+'">Eliminar</button></div>'+
+      (cal ? '<div style="display:flex; gap:14px; margin-top:6px;">'+
+        '<a href="'+cal.gcalUrl+'" target="_blank" rel="noopener" class="ghost-small" style="color:var(--pine); text-decoration:none;">🗓️ Google Calendar</a>'+
+        '<a href="'+cal.icsUrl+'" download="recordatorio-vacuna-'+v.id+'.ics" class="ghost-small" style="text-decoration:none;">⬇️ .ics</a>'+
+        '</div>' : '');
     wrap.appendChild(card);
   });
   wrap.querySelectorAll('[data-lightbox]').forEach(img=>{
@@ -1831,7 +1851,7 @@ function updateCalendarLinks(){
   const hoy = todayStr();
   const startStr = buildDateTimeStr(hoy, horaInput);
   const [hh,mm] = horaInput.split(':').map(Number);
-  let endH=hh, endM=mm+15;
+  let endH=hh, endM=mm+30;
   if(endM>=60){ endM-=60; endH+=1; if(endH>=24) endH-=24; }
   const endStr = buildDateTimeStr(hoy, pad(endH)+':'+pad(endM));
   const text = encodeURIComponent('Completar diario de '+nombreTexto);
