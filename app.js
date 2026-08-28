@@ -909,7 +909,7 @@ function medCalendarUrls(med){
   const hora = (med.horarios && med.horarios[0]) ? med.horarios[0] : '09:00';
   const startStr = buildDateTimeStr(med.fechaInicio, hora);
   const [hh,mm] = hora.split(':').map(Number);
-  let endH=hh, endM=mm+30;
+  let endH=hh, endM=mm+15;
   if(endM>=60){ endM-=60; endH+=1; if(endH>=24) endH-=24; }
   const endStr = buildDateTimeStr(med.fechaInicio, pad(endH)+':'+pad(endM));
   const dosisTxt = med.tipo==='fijo' ? (med.dosisFija||'') : (med.tipo==='recurrente' ? (med.dosisRec||'según corresponda') : 'según el día');
@@ -1831,7 +1831,7 @@ function updateCalendarLinks(){
   const hoy = todayStr();
   const startStr = buildDateTimeStr(hoy, horaInput);
   const [hh,mm] = horaInput.split(':').map(Number);
-  let endH=hh, endM=mm+30;
+  let endH=hh, endM=mm+15;
   if(endM>=60){ endM-=60; endH+=1; if(endH>=24) endH-=24; }
   const endStr = buildDateTimeStr(hoy, pad(endH)+':'+pad(endM));
   const text = encodeURIComponent('Completar diario de '+nombreTexto);
